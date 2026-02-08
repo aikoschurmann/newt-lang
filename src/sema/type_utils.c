@@ -60,5 +60,12 @@ bool type_can_implicit_cast(Type *target, Type *source) {
         }
     }
 
+    // 3. Pointer Relaxation (T[N]* -> T[]*)
+    if (target->kind == TYPE_POINTER && source->kind == TYPE_POINTER) {
+        // A pointer is compatible if its base types are compatible
+        // This allows i64[6]* to cast to i64[]*
+        return type_can_implicit_cast(target->as.ptr.base, source->as.ptr.base);
+    }
+
     return false;
 }

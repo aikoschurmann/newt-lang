@@ -352,6 +352,20 @@ static void check_statement(TypeCheckContext *ctx, Scope *scope, AstNode *stmt, 
             check_statement(ctx, scope, ws->body, return_type);
             break;
         }
+        case AST_FOR_STATEMENT: {
+            AstForStatement *fs = &stmt->data.for_statement;
+            // 1. Create a scope for the loop
+            Scope *for_scope = scope_create(ctx->store->arena, scope, 8, SCOPE_IDENTIFIERS);
+                
+            // 2. Check the parts
+            if (fs->init) check_statement(ctx, for_scope, fs->init, return_type);
+            if (fs->condition) check_expression(ctx, for_scope, fs->condition, ctx->store->t_bool);
+            if (fs->post) check_expression(ctx, for_scope, fs->post, NULL);
+                
+            // 3. Check the body
+            check_statement(ctx, for_scope, fs->body, return_type);
+            break;
+        }
 
         case AST_EXPR_STATEMENT: 
             check_expression(ctx, scope, stmt->data.expr_statement.expression, NULL); 

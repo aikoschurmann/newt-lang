@@ -98,7 +98,7 @@ clean:
 
 # Run the compiled program (default run)
 run: all
-	./$(OUT_DIR)/$(NAME) ./input/test.rs 
+	./$(OUT_DIR)/$(NAME) ./input/test.rs --ast --types
 
 test: $(OUT_DIR)/test_runner
 	./$(OUT_DIR)/test_runner
