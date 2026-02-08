@@ -215,3 +215,165 @@ int test_exception_deep_blocks() {
     free(buf);
     return 1;
 }
+
+int test_parser_for_statement() {
+    // 1. Test Standard Loop Structure: for (i: i32 = 0; i < 10; i++) {}
+    const char *src = "fn main() { for (i: i32 = 0; i < 10; i++) { return; } }";
+    CompileResult res = compile_source((char*)src);
+    ASSERT(!res.parse_failed);
+    
+    // Traverse AST: Program -> Decl -> Function -> Block -> ForStatement
+    AstNode *prog = res.program;
+    AstNode *func = *(AstNode**)dynarray_get(prog->data.program.decls, 0);
+    AstBlock *func_body = &func->data.function_declaration.body->data.block;
+    AstNode *stmt = *(AstNode**)dynarray_get(func_body->statements, 0);
+    
+    ASSERT_EQ_INT(stmt->node_type, AST_FOR_STATEMENT);
+    
+    // Check Init (VariableDeclaration)
+    AstNode *init = stmt->data.for_statement.init;
+    ASSERT_NOT_NULL(init);
+    ASSERT_EQ_INT(init->node_type, AST_VARIABLE_DECLARATION);
+    
+    // Check Condition (BinaryExpr)
+    AstNode *cond = stmt->data.for_statement.condition;
+    ASSERT_NOT_NULL(cond);
+    ASSERT_EQ_INT(cond->node_type, AST_BINARY_EXPR);
+    ASSERT_EQ_INT(cond->data.binary_expr.op, OP_LT);
+    
+    // Check Post (UnaryExpr i++)
+    AstNode *post = stmt->data.for_statement.post;
+    ASSERT_NOT_NULL(post);
+    ASSERT_EQ_INT(post->node_type, AST_UNARY_EXPR); // Postfix is often stored as Unary or Postfix depending on impl
+    // Based on your parser, ++ is mapped to OP_POST_INC/DEC
+    
+    cleanup_compilation(&res);
+
+    // 2. Test Variations (ensure they don't crash or fail parse)
+    
+    // Missing Init: for (; i < 10; i++)
+    const char *src_no_init = "fn main() { i: i32 = 0; for (; i < 10; i++) {} }";
+    res = compile_source((char*)src_no_init);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    // Missing Condition (Infinite): for (i=0; ; i++)
+    const char *src_no_cond = "fn main() { for (i: i32=0; ; i++) { break; } }";
+    res = compile_source((char*)src_no_cond);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    // Missing Post: for (i=0; i<10; )
+    const char *src_no_post = "fn main() { for (i: i32=0; i<10; ) { i++; } }";
+    res = compile_source((char*)src_no_post);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    // Forever Loop: for (;;)
+    const char *src_forever = "fn main() { for (;;) { break; } }";
+    res = compile_source((char*)src_forever);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    // Expression Init (assignment instead of decl): for (x = 0; x < 10; x++)
+    const char *src_expr_init = "fn main() { x: i32; for (x = 0; x < 10; x++) {} }";
+    res = compile_source((char*)src_expr_init);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    return 1;
+}
+
+int test_parser_while_statement() {
+    // 1. Standard While: while (x < 10) { ... }
+    const char *src = "fn main() { while (x < 10) { x++; } }";
+    CompileResult res = compile_source((char*)src);
+    ASSERT(!res.parse_failed);
+
+    AstNode *prog = res.program;
+    AstNode *func = *(AstNode**)dynarray_get(prog->data.program.decls, 0);
+    AstBlock *func_body = &func->data.function_declaration.body->data.block;
+    AstNode *stmt = *(AstNode**)dynarray_get(func_body->statements, 0);
+
+    ASSERT_EQ_INT(stmt->node_type, AST_WHILE_STATEMENT);
+    ASSERT_NOT_NULL(stmt->data.while_statement.condition);
+    ASSERT_NOT_NULL(stmt->data.while_statement.body);
+    
+    cleanup_compilation(&res);
+
+    // 2. Optional Parentheses: while x < 10 { ... }
+    // Your grammar: <WhileStmt> ::= WHILE [ LPAREN ] <Expression> [ RPAREN ] <Block>
+    const char *src_no_paren = "fn main() { while x < 10 { x--; } }";
+    res = compile_source((char*)src_no_paren);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    return 1;
+}
+
+int test_parser_arrays_and_pointers() {
+    // 1. Array Indexing: a[10]
+    const char *src_arr = "fn main() { val = a[10]; }";
+    CompileResult res = compile_source((char*)src_arr);
+    ASSERT(!res.parse_failed);
+    
+    AstNode *func = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
+    AstNode *stmt = *(AstNode**)dynarray_get(func->data.function_declaration.body->data.block.statements, 0);
+    // stmt is Assignment -> rvalue is Subscript
+    AstNode *rvalue = stmt->data.assignment_expr.rvalue;
+    
+    ASSERT_EQ_INT(rvalue->node_type, AST_SUBSCRIPT_EXPR);
+    ASSERT_NOT_NULL(rvalue->data.subscript_expr.target); // 'a'
+    ASSERT_NOT_NULL(rvalue->data.subscript_expr.index);  // '10'
+    
+    cleanup_compilation(&res);
+
+    // 2. Multi-dimensional: a[1][2]
+    // Should parse as (a[1])[2]
+    const char *src_multi = "fn main() { val = a[1][2]; }";
+    res = compile_source((char*)src_multi);
+    ASSERT(!res.parse_failed);
+    cleanup_compilation(&res);
+
+    // 3. Pointer Dereference: *x
+    const char *src_ptr = "fn main() { val = *x; }";
+    res = compile_source((char*)src_ptr);
+    ASSERT(!res.parse_failed);
+    
+    func = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
+    stmt = *(AstNode**)dynarray_get(func->data.function_declaration.body->data.block.statements, 0);
+    rvalue = stmt->data.assignment_expr.rvalue;
+
+    ASSERT_EQ_INT(rvalue->node_type, AST_UNARY_EXPR);
+    ASSERT_EQ_INT(rvalue->data.unary_expr.op, OP_DEREF);
+    
+    cleanup_compilation(&res);
+
+    return 1;
+}
+
+int test_parser_flow_control() {
+    // 1. Return with value
+    const char *src_ret = "fn main() { return 0; }";
+    CompileResult res = compile_source((char*)src_ret);
+    ASSERT(!res.parse_failed);
+    
+    AstNode *func = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
+    AstNode *stmt = *(AstNode**)dynarray_get(func->data.function_declaration.body->data.block.statements, 0);
+    
+    ASSERT_EQ_INT(stmt->node_type, AST_RETURN_STATEMENT);
+    ASSERT_NOT_NULL(stmt->data.return_statement.expression);
+    cleanup_compilation(&res);
+
+    // 2. Return void (no expression)
+    const char *src_ret_void = "fn main() { return; }";
+    res = compile_source((char*)src_ret_void);
+    ASSERT(!res.parse_failed);
+    func = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
+    stmt = *(AstNode**)dynarray_get(func->data.function_declaration.body->data.block.statements, 0);
+    ASSERT_EQ_INT(stmt->node_type, AST_RETURN_STATEMENT);
+    ASSERT(stmt->data.return_statement.expression == NULL);
+    cleanup_compilation(&res);
+
+    return 1;
+}

@@ -16,13 +16,16 @@ int test_parser_unary_precedence();
 int test_parser_comparison_precedence();
 int test_parser_paren_expression(); 
 int test_parser_if_statement(); 
-// Extended Parser
 int test_parser_unclosed_paren();
 int test_parser_missing_semicolon();
 int test_parser_bad_stmt_start();
 int test_parser_nested_parens();
 int test_parser_extra_tokens();
 int test_parser_empty_file();
+int test_parser_for_statement(); 
+int test_parser_while_statement();
+int test_parser_arrays_and_pointers();
+int test_parser_flow_control();
 
 int test_sema_arg_mismatch_regression();
 int test_sema_type_mismatch(); 
@@ -32,6 +35,12 @@ int test_sema_valid_program();
 int test_sema_call_arg_count();
 int test_sema_call_arg_type();
 int test_sema_full_features(); // Full integration test
+int test_sema_type_promotion();
+int test_sema_array_inference_1d();
+int test_sema_array_inference_mixed_types();
+int test_sema_multidimensional_arrays();
+int test_sema_initializer_errors();
+int test_sema_const_folding();
 
 // Exceptions
 int test_exception_long_identifier();
@@ -64,6 +73,10 @@ int main() {
     run_test("Parser: Nested Parens", test_parser_nested_parens);
     run_test("Parser: Extra Tokens", test_parser_extra_tokens);
     run_test("Parser: Empty File", test_parser_empty_file);
+    run_test("Parser: For Statement", test_parser_for_statement);
+    run_test("Parser: While Statement", test_parser_while_statement);
+    run_test("Parser: Arrays & Pointers", test_parser_arrays_and_pointers);
+    run_test("Parser: Flow Control", test_parser_flow_control);
 
     // Sema Tests
     run_test("Sema: Arg Count Mismatch", test_sema_arg_mismatch_regression);
@@ -73,6 +86,12 @@ int main() {
     run_test("Sema: Call Arg Count", test_sema_call_arg_count);
     run_test("Sema: Call Arg Type", test_sema_call_arg_type);
     run_test("Sema: Full Features", test_sema_full_features);
+    run_test("Sema: Type Promotion", test_sema_type_promotion);
+    run_test("Sema: Array Inference (1D)", test_sema_array_inference_1d);
+    run_test("Sema: Array Inference (Mixed)", test_sema_array_inference_mixed_types);
+    run_test("Sema: 2D Arrays", test_sema_multidimensional_arrays);
+    run_test("Sema: Initializer Errors", test_sema_initializer_errors);
+    run_test("Sema: Const Folding", test_sema_const_folding);
 
     // Exceptions & Stress
     run_test("Exception: Long Identifier", test_exception_long_identifier);

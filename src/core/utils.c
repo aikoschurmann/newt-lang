@@ -34,6 +34,6 @@ size_t get_peak_rss_kb(void) {
 #else
     struct rusage r;
     getrusage(RUSAGE_SELF, &r);
-    return (size_t)r.ru_maxrss; // ru_maxrss is in KB on Linux/BSD
+    return (size_t)r.ru_maxrss / 1024;
 #endif
 }

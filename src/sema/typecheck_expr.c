@@ -393,7 +393,7 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         
         if (!actual_elem_type) {
             any_error = true;
-            continue; 
+            break; 
         }
 
         // Structural Consistency

@@ -334,10 +334,10 @@ AstNode *parse_type(Parser *p, ParseError *err) {
 
     Token *token = current_token(p);
 
-    /* pointer prefixes: allow repeated leading '*' */
+    /* pointer prefixes/suffixes */
     while (token && token->type == TOK_STAR) {
         Token *star = consume(p, TOK_STAR);
-        if (!star) { if (err) create_parse_error(err, p, "expected '*' for pointer suffix", current_token(p)); return NULL; }
+        if (!star) { if (err) create_parse_error(err, p, "expected '*'", current_token(p)); return NULL; }
 
         AstNode *ptr_type = new_node_or_err(p, AST_TYPE, err, "out of memory creating pointer type node");
         if (!ptr_type) return NULL;
@@ -351,9 +351,13 @@ AstNode *parse_type(Parser *p, ParseError *err) {
     }
 
     /* arrays: [ <const-expr>? ] */
+    /* FIX: Parse dimensions into a list, then wrap REVERSELY (Right-to-Left) */
+    DynArray *dims = alloc_dynarray(p, err, sizeof(AstNode*), 4, "out of memory for array dimensions");
+    if (!dims) return NULL;
+
     while (token && token->type == TOK_LBRACKET) {
         Token *lbr = consume(p, TOK_LBRACKET);
-        if (!lbr) { if (err) create_parse_error(err, p, "expected '[' for array suffix", current_token(p)); return NULL; }
+        if (!lbr) { if (err) create_parse_error(err, p, "expected '['", current_token(p)); return NULL; }
 
         AstNode *size_expr = NULL;
         Token *peek = current_token(p);
@@ -363,32 +367,44 @@ AstNode *parse_type(Parser *p, ParseError *err) {
         }
 
         Token *rbr = consume(p, TOK_RBRACKET);
-        if (!rbr) { if (err) err->use_prev_token = true; create_parse_error(err, p, "expected ']' after array size expression", current_token(p)); return NULL; }
+        if (!rbr) { if (err) err->use_prev_token = true; create_parse_error(err, p, "expected ']'", current_token(p)); return NULL; }
 
-        AstNode *array_type = new_node_or_err(p, AST_TYPE, err, "out of memory creating array type node");
+        // We create the array node here to capture the span and size, but don't set 'elem' yet
+        AstNode *array_type = new_node_or_err(p, AST_TYPE, err, "out of memory");
         if (!array_type) return NULL;
 
         array_type->data.ast_type.kind = AST_TYPE_ARRAY;
-        array_type->data.ast_type.u.array.elem = base;
         array_type->data.ast_type.u.array.size_expr = size_expr;
-        array_type->data.ast_type.span = span_join(&base->span, &rbr->span);
+        array_type->data.ast_type.u.array.elem = NULL; // Set later
+        // Temporary span covering just the brackets/size
+        array_type->span = span_join(&lbr->span, &rbr->span); 
 
-        base = array_type;
+        if (dynarray_push_value(dims, &array_type) != 0) {
+             if (err) create_parse_error(err, p, "out of memory pushing array dim", NULL);
+             return NULL;
+        }
         token = current_token(p);
     }
 
-    /* pointer suffixes (if any, allow mixing) */
+    /* Apply dimensions Backwards (Right-to-Left) */
+    for (size_t i = dims->count; i > 0; i--) {
+        AstNode *dim_node = *(AstNode**)dynarray_get(dims, i - 1);
+        dim_node->data.ast_type.u.array.elem = base;
+        // Extend span to cover the base it wraps
+        dim_node->span = span_join(&base->span, &dim_node->span);
+        base = dim_node;
+    }
+
+    /* pointer suffixes again (if any) */
     while (token && token->type == TOK_STAR) {
         Token *star = consume(p, TOK_STAR);
-        if (!star) { if (err) create_parse_error(err, p, "expected '*' for pointer suffix", current_token(p)); return NULL; }
+        if (!star) { if (err) create_parse_error(err, p, "expected '*'", current_token(p)); return NULL; }
 
         AstNode *ptr_type = new_node_or_err(p, AST_TYPE, err, "out of memory creating pointer type node");
         if (!ptr_type) return NULL;
-
         ptr_type->data.ast_type.kind = AST_TYPE_PTR;
         ptr_type->data.ast_type.u.ptr.target = base;
         ptr_type->data.ast_type.span = span_join(&base->span, &star->span);
-
         base = ptr_type;
         token = current_token(p);
     }
@@ -1300,8 +1316,62 @@ AstNode *parse_while_statement(Parser *p, ParseError *err) {
 AstNode *parse_for_statement(Parser *p, ParseError *err) {
     if (!p) return NULL;
 
-    if(err) create_parse_error(err, p, "parse_for_statement not yet implemented", NULL);
-    return NULL;
+    Token *for_tok = consume(p, TOK_FOR);
+    if (!for_tok) { 
+        if (err) create_parse_error(err, p, "expected 'for' keyword", current_token(p)); 
+        return NULL; 
+    }
+
+    AstNode *for_node = ast_create_node(AST_FOR_STATEMENT, p->arena);
+    // Initialize for_node->data.for_statement fields to NULL...
+
+    if (!consume(p, TOK_LPAREN)) {
+        if (err) create_parse_error(err, p, "expected '(' after 'for'", current_token(p));
+        return NULL;
+    }
+
+    // 1. Init Clause (Declaration or Expression)
+    if (current_token(p)->type != TOK_SEMICOLON) {
+        // Check if it's a variable declaration (starts with Identifier then Colon)
+        // Or just parse as statement which handles both Decl and ExprStmt
+        AstNode *init = parse_statement(p, err); 
+        if (!init) return NULL;
+        for_node->data.for_statement.init = init;
+        // Note: parse_statement usually consumes the semicolon. 
+        // If your BNF expects a semicolon *separator*, ensure parse_statement didn't already eat it
+        // or assumes the init clause includes the semicolon (which <VariableDeclarationStmt> does).
+    } else {
+        consume(p, TOK_SEMICOLON); // Empty init
+    }
+
+    // 2. Condition Clause
+    if (current_token(p)->type != TOK_SEMICOLON) {
+        for_node->data.for_statement.condition = parse_expression(p, err);
+        if (!for_node->data.for_statement.condition) return NULL;
+    }
+    if (!consume(p, TOK_SEMICOLON)) {
+         if (err) create_parse_error(err, p, "expected ';' after condition", current_token(p));
+         return NULL;
+    }
+
+    // 3. Post Clause
+    if (current_token(p)->type != TOK_RPAREN) {
+        for_node->data.for_statement.post = parse_expression(p, err);
+        if (!for_node->data.for_statement.post) return NULL;
+    }
+    
+    Token *rparen = consume(p, TOK_RPAREN);
+    if (!rparen) {
+        if (err) create_parse_error(err, p, "expected ')' after for clauses", current_token(p));
+        return NULL;
+    }
+
+    // 4. Body
+    for_node->data.for_statement.body = parse_block(p, err);
+    if (!for_node->data.for_statement.body) return NULL;
+
+    // Join spans...
+    return for_node;
 }
 
 AstNode *parse_return_statement(Parser *p, ParseError *err) {
