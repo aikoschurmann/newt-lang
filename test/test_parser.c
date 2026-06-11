@@ -352,6 +352,26 @@ int test_parser_arrays_and_pointers() {
     return 1;
 }
 
+int test_parser_member_access() {
+    // a.b
+    Arena *arena = arena_create(1024*1024);
+    const char *src = "a.b";
+    Lexer *lexer = lexer_create(src, strlen(src), arena);
+    lexer_lex_all(lexer);
+    Parser *p = parser_create(lexer->tokens, "test", arena);
+    
+    ParseError err = {0};
+    AstNode *expr = parse_expression(p, &err);
+    ASSERT_NOT_NULL(expr);
+    ASSERT_EQ_INT(expr->node_type, AST_MEMBER_EXPR);
+    ASSERT_NOT_NULL(expr->data.member_expr.target);
+    ASSERT_NOT_NULL(expr->data.member_expr.member);
+
+    lexer_destroy(lexer);
+    arena_destroy(arena);
+    return 1;
+}
+
 int test_parser_flow_control() {
     // 1. Return with value
     const char *src_ret = "fn main() { return 0; }";

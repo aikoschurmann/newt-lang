@@ -12,10 +12,13 @@ void run_test(const char *name, TestFunc func) {
     fprintf(stderr, " ... %-40s", name);
     fflush(stderr);
     
-    clock_t start = clock();
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
     int result = func();
-    clock_t end = clock();
-    double cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    
+    double diff = (double)(end.tv_sec - start.tv_sec) + 
+                  (double)(end.tv_nsec - start.tv_nsec) / 1e9;
 
     if (result) {
         g_tests_passed++;
@@ -23,7 +26,7 @@ void run_test(const char *name, TestFunc func) {
         fprintf(stderr, "\r %s✓%s %-40s %s%8.3fms%s\n", 
             COL_GREEN, COL_RESET, 
             name, 
-            COL_CYAN, cpu_time_used * 1000.0, COL_RESET);
+            COL_CYAN, diff * 1000.0, COL_RESET);
     } else {
         g_tests_failed++;
         // If ASSERT failed, it printed an error message with newline.

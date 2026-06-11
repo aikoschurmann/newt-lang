@@ -15,7 +15,7 @@ static int run_compiled_code(const char *src) {
         return -100; // Compilation failed
     }
 
-    CodegenContext *cg_ctx = codegen_context_create(res.program, "test_module");
+    CodegenContext *cg_ctx = codegen_context_create(res.program, res.store, "test_module");
     if (codegen_program(cg_ctx) != 0) {
         codegen_context_destroy(cg_ctx);
         cleanup_compilation(&res);
@@ -229,5 +229,61 @@ int test_codegen_strings() {
         "}";
     int code = run_compiled_code(src);
     ASSERT_EQ_INT(code, 42);
+    return 1;
+}
+
+int test_codegen_slice_len_write() {
+    const char *src = 
+        "fn main() -> i32 {\n"
+        "  arr: i32[10];\n"
+        "  slice: i32[] = arr;\n"
+        "  return slice.len;\n"
+        "}";
+    int code = run_compiled_code(src);
+    ASSERT_EQ_INT(code, 10);
+    return 1;
+}
+
+int test_codegen_fixed_array_len() {
+    const char *src = 
+        "fn main() -> i32 {\n"
+        "  arr: i32[15];\n"
+        "  return arr.len;\n"
+        "}";
+    int code = run_compiled_code(src);
+    ASSERT_EQ_INT(code, 15);
+    return 1;
+}
+
+int test_codegen_multi_array_len() {
+    const char *src = 
+        "fn main() -> i32 {\n"
+        "  arr: i32[3][4];\n"
+        "  // arr.len should be 3\n"
+        "  // arr[0].len should be 4\n"
+        "  return arr.len + arr[0].len;\n"
+        "}";
+    int code = run_compiled_code(src);
+    ASSERT_EQ_INT(code, 7);
+    return 1;
+}
+
+int test_codegen_multi_array_slice_func() {
+    const char *src = 
+        "fn sum_slice(s: i32[][]) -> i32 {\n"
+        "  sum: i32 = 0;\n"
+        "  for(i: i32 = 0; i < s.len; i++) {\n"
+        "    for(j: i32 = 0; j < s[i].len; j++) {\n"
+        "      sum += s[i][j];\n"
+        "    }\n"
+        "  }\n"
+        "  return sum;\n"
+        "}\n"
+        "fn main() -> i32 {\n"
+        "  arr: i32[2][2] = {{1, 2}, {3, 4}};\n"
+        "  return sum_slice(arr);\n"
+        "}";
+    int code = run_compiled_code(src);
+    ASSERT_EQ_INT(code, 10);
     return 1;
 }

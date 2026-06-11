@@ -25,6 +25,7 @@ int test_parser_empty_file();
 int test_parser_for_statement(); 
 int test_parser_while_statement();
 int test_parser_arrays_and_pointers();
+int test_parser_member_access();
 int test_parser_flow_control();
 
 int test_sema_arg_mismatch_regression();
@@ -42,6 +43,7 @@ int test_sema_multidimensional_arrays();
 int test_sema_initializer_errors();
 int test_sema_const_folding();
 int test_sema_bounds_checks();
+int test_sema_array_len();
 
 // Codegen Tests
 int test_codegen_basic_arithmetic();
@@ -57,6 +59,10 @@ int test_codegen_shadowing();
 int test_codegen_type_promotion();
 int test_codegen_large_array();
 int test_codegen_strings();
+int test_codegen_slice_len_write();
+int test_codegen_fixed_array_len();
+int test_codegen_multi_array_len();
+int test_codegen_multi_array_slice_func();
 
 // Exceptions
 int test_exception_long_identifier();
@@ -93,6 +99,7 @@ int main() {
     run_test("Parser: For Statement", test_parser_for_statement);
     run_test("Parser: While Statement", test_parser_while_statement);
     run_test("Parser: Arrays & Pointers", test_parser_arrays_and_pointers);
+    run_test("Parser: Member Access", test_parser_member_access);
     run_test("Parser: Flow Control", test_parser_flow_control);
 
     // Sema Tests
@@ -110,6 +117,7 @@ int main() {
     run_test("Sema: Initializer Errors", test_sema_initializer_errors);
     run_test("Sema: Const Folding", test_sema_const_folding);
     run_test("Sema: Bounds Checks", test_sema_bounds_checks);
+    run_test("Sema: Array Len", test_sema_array_len);
 
     // Codegen Tests
     run_test("Codegen: Basic Arithmetic", test_codegen_basic_arithmetic);
@@ -125,6 +133,10 @@ int main() {
     run_test("Codegen: Type Promotion", test_codegen_type_promotion);
     run_test("Codegen: Large Arrays", test_codegen_large_array);
     run_test("Codegen: Strings", test_codegen_strings);
+    run_test("Codegen: Slice Len Write", test_codegen_slice_len_write);
+    run_test("Codegen: Fixed Array Len", test_codegen_fixed_array_len);
+    run_test("Codegen: Multi Array Len", test_codegen_multi_array_len);
+    run_test("Codegen: Multi Array Slice Func", test_codegen_multi_array_slice_func);
 
     // Exceptions & Stress
     run_test("Exception: Long Identifier", test_exception_long_identifier);

@@ -150,7 +150,7 @@ int test_sema_type_promotion() {
     
     // Check that we either inserted a cast or promoted the type
     // Depending on implementation, it might be an implicit cast node or a modified literal
-    bool promoted = (init->node_type == AST_CAST && init->data.cast_expr.target_type->kind == AST_TYPE_PRIMITIVE) ||
+    bool promoted = (init->node_type == AST_CAST && init->data.cast_expr.target_type->kind == TYPE_PRIMITIVE) ||
                     (init->node_type == AST_LITERAL && type_is_float(init->type));
     
     ASSERT(promoted);
@@ -486,7 +486,35 @@ int test_sema_full_features() {
         cleanup_compilation(&res);
         return 0;
     }
+
+    cleanup_compilation(&res);
+    return 1;
+}
+
+int test_sema_array_len() {
+    const char *src = "fn main() { arr: i32[5]; x: i64 = arr.len; }";
+    CompileResult res = compile_source(src);
+    ASSERT(!res.parse_failed);
+
+    if (res.ctx.errors->count > 0) {
+        for (size_t i = 0; i < res.ctx.errors->count; i++) {
+            TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, i);
+            print_type_error(err);
+        }
+    }
+    ASSERT(res.ctx.errors->count == 0);
+
+    // Check that it was folded to a literal 5
+    // main is decls[0]
+    AstNode *main_func = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
+    AstNode *block = main_func->data.function_declaration.body;
+    // x is statements[1]
+    AstNode *x_decl = *(AstNode**)dynarray_get(block->data.block.statements, 1);
+    AstNode *init = x_decl->data.variable_declaration.initializer;
     
+    ASSERT_EQ_INT(init->node_type, AST_LITERAL);
+    ASSERT_EQ_INT(init->const_value.value.int_val, 5);
+
     cleanup_compilation(&res);
     return 1;
 }
