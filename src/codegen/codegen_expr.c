@@ -46,15 +46,47 @@ LLVMValueRef codegen_expr_ident(CodegenContext *ctx, AstNode *expr) {
     return LLVMBuildLoad2(ctx->builder, ty, ptr, "loadtmp");
 }
 
+LLVMValueRef codegen_expr_member(CodegenContext *ctx, AstNode *expr) {
+    AstMemberExpr *mem_expr = &expr->data.member_expr;
+    Type *target_type = mem_expr->target->type;
+
+    if (target_type->kind == TYPE_ARRAY) {
+        if (target_type->as.array.size_known) {
+            return LLVMConstInt(LLVMInt64TypeInContext(ctx->context), target_type->as.array.size, 0);
+        }
+        
+        LLVMValueRef target_lvalue = codegen_lvalue(ctx, mem_expr->target);
+        if (!target_lvalue) return NULL;
+
+        LLVMTypeRef struct_ty = get_llvm_type(ctx, target_type);
+        LLVMValueRef len_ptr = LLVMBuildStructGEP2(ctx->builder, struct_ty, target_lvalue, 1, "len_gep");
+        return LLVMBuildLoad2(ctx->builder, LLVMInt64TypeInContext(ctx->context), len_ptr, "len_val");
+    }
+    
+    // Future: TYPE_STRUCT handling goes here.
+    return NULL;
+}
+
 LLVMValueRef codegen_expr(CodegenContext *ctx, AstNode *expr) {
     if (!expr) return NULL;
 
     switch (expr->node_type) {
         case AST_LITERAL:          return codegen_expr_literal(ctx, expr);
         case AST_IDENTIFIER:       return codegen_expr_ident(ctx, expr);
+        case AST_MEMBER_EXPR:      return codegen_expr_member(ctx, expr);
         case AST_SUBSCRIPT_EXPR: {
             LLVMValueRef ptr = codegen_lvalue(ctx, expr);
             if (!ptr) return NULL;
+
+            if (expr->type && expr->type->kind == TYPE_ARRAY) {
+                if (expr->type->as.array.size_known) {
+                    return ptr; // Decay
+                } else {
+                    LLVMTypeRef struct_ty = get_llvm_type(ctx, expr->type);
+                    return LLVMBuildLoad2(ctx->builder, struct_ty, ptr, "slice_load");
+                }
+            }
+
             LLVMTypeRef ty = get_llvm_type(ctx, expr->type);
             if (LLVMGetTypeKind(ty) == LLVMVoidTypeKind) return NULL;
             return LLVMBuildLoad2(ctx->builder, ty, ptr, "loadtmp");

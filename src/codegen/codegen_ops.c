@@ -1,5 +1,54 @@
 #include "codegen_internal.h"
 
+static LLVMValueRef codegen_materialize_slice(CodegenContext *ctx, LLVMValueRef val, Type *src_type, Type *dst_type) {
+    size_t n = src_type->as.array.size;
+    Type *src_inner = src_type->as.array.base;
+    Type *dst_inner = dst_type->as.array.base;
+    
+    LLVMTypeRef dst_ty = get_llvm_type(ctx, dst_type);
+    LLVMTypeRef i32_ty = LLVMInt32TypeInContext(ctx->context);
+    LLVMTypeRef i64_ty = LLVMInt64TypeInContext(ctx->context);
+
+    // Check if the inner array also needs casting to a slice
+    bool inner_needs_deep_cast = 
+        src_inner->kind == TYPE_ARRAY && src_inner->as.array.size_known &&
+        dst_inner->kind == TYPE_ARRAY && !dst_inner->as.array.size_known;
+
+    if (!inner_needs_deep_cast) {
+        // Base case (1D array): Just bitcast the pointer and pack it with length
+        LLVMValueRef fat = LLVMGetUndef(dst_ty);
+        LLVMTypeRef elem_ptr_ty = LLVMStructGetTypeAtIndex(dst_ty, 0);
+        LLVMValueRef elem_ptr = LLVMBuildBitCast(ctx->builder, val, elem_ptr_ty, "array_ptr_decay");
+        fat = LLVMBuildInsertValue(ctx->builder, fat, elem_ptr, 0, "fat_ptr_ptr");
+        fat = LLVMBuildInsertValue(ctx->builder, fat, LLVMConstInt(i64_ty, n, 0), 1, "fat_ptr_len");
+        return fat;
+    }
+
+    // Recursive case (2D+ array): Allocate headers on stack
+    LLVMTypeRef elem_slice_ty = get_llvm_type(ctx, dst_inner);
+    LLVMTypeRef hdrs_arr_ty = LLVMArrayType(elem_slice_ty, n);
+    LLVMTypeRef outer_arr_ty = get_llvm_type(ctx, src_type);
+    
+    LLVMValueRef hdrs = LLVMBuildAlloca(ctx->builder, hdrs_arr_ty, "slice_hdrs");
+
+    // Loop through rows and materialize inner slices
+    for (size_t i = 0; i < n; i++) {
+        LLVMValueRef idx[] = { LLVMConstInt(i32_ty, 0, 0), LLVMConstInt(i32_ty, (unsigned)i, 0) };
+        LLVMValueRef row_ptr = LLVMBuildGEP2(ctx->builder, outer_arr_ty, val, idx, 2, "row_ptr");
+        
+        LLVMValueRef row_fat = codegen_materialize_slice(ctx, row_ptr, src_inner, dst_inner);
+        
+        LLVMValueRef hdr_ptr = LLVMBuildGEP2(ctx->builder, hdrs_arr_ty, hdrs, idx, 2, "hdr_ptr");
+        LLVMBuildStore(ctx->builder, row_fat, hdr_ptr);
+    }
+
+    // Pack the temporary headers into the outer slice
+    LLVMValueRef outer = LLVMGetUndef(dst_ty);
+    outer = LLVMBuildInsertValue(ctx->builder, outer, hdrs, 0, "outer_ptr");
+    outer = LLVMBuildInsertValue(ctx->builder, outer, LLVMConstInt(i64_ty, n, 0), 1, "outer_len");
+    return outer;
+}
+
 LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
     if (expr->node_type == AST_CAST) {
         AstCastExpr *cast_node = &expr->data.cast_expr;
@@ -19,7 +68,44 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
                 if (src_w > dst_w)  return LLVMBuildTrunc(ctx->builder, val, dst_ty, "trunc");
                 return LLVMBuildSExt(ctx->builder, val, dst_ty, "sext");
             }
+
+            // Special Case: T[N]* -> T[]* (Pointer to Array to Pointer to Slice)
+            if (src_k == LLVMPointerTypeKind && 
+                cast_node->expr->type->kind == TYPE_POINTER && 
+                cast_node->target_type->kind == TYPE_POINTER) {
+                
+                Type *src_base = cast_node->expr->type->as.ptr.base;
+                Type *dst_base = cast_node->target_type->as.ptr.base;
+                
+                if (src_base->kind == TYPE_ARRAY && dst_base->kind == TYPE_ARRAY &&
+                    src_base->as.array.size_known && !dst_base->as.array.size_known) {
+                    
+                    LLVMTypeRef slice_ty = get_llvm_type(ctx, dst_base);
+                    LLVMValueRef slice_alloca = LLVMBuildAlloca(ctx->builder, slice_ty, "temp_slice_ptr_cast");
+
+                    // 1. Data Pointer
+                    LLVMTypeRef elem_ptr_ty = LLVMStructGetTypeAtIndex(slice_ty, 0);
+                    LLVMValueRef data_ptr = LLVMBuildBitCast(ctx->builder, val, elem_ptr_ty, "array_decay");
+                    LLVMValueRef data_ptr_gep = LLVMBuildStructGEP2(ctx->builder, slice_ty, slice_alloca, 0, "data_gep");
+                    LLVMBuildStore(ctx->builder, data_ptr, data_ptr_gep);
+
+                    // 2. Length
+                    LLVMValueRef len = LLVMConstInt(LLVMInt64TypeInContext(ctx->context), src_base->as.array.size, 0);
+                    LLVMValueRef len_gep = LLVMBuildStructGEP2(ctx->builder, slice_ty, slice_alloca, 1, "len_gep");
+                    LLVMBuildStore(ctx->builder, len, len_gep);
+
+                    return slice_alloca;
+                }
+            }
         } else {
+            // Special Case: Array to Slice (Fat Pointer)
+            if (cast_node->expr->type->kind == TYPE_ARRAY && cast_node->target_type->kind == TYPE_ARRAY) {
+                if (!cast_node->target_type->as.array.size_known && cast_node->expr->type->as.array.size_known) {
+                    // val is the pointer to the array (from codegen_expr_ident)
+                    return codegen_materialize_slice(ctx, val, cast_node->expr->type, cast_node->target_type);
+                }
+            }
+
             if (src_k == LLVMPointerTypeKind && dst_k == LLVMIntegerTypeKind)
                 return LLVMBuildPtrToInt(ctx->builder, val, dst_ty, "ptrtoint");
             if (src_k == LLVMIntegerTypeKind && dst_k == LLVMPointerTypeKind)

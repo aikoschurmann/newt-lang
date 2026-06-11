@@ -22,36 +22,58 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
 
     if (expr->node_type == AST_SUBSCRIPT_EXPR) {
         AstSubscriptExpr *sub = &expr->data.subscript_expr;
-        LLVMValueRef target = NULL;
         Type *target_type = sub->target->type;
+        LLVMValueRef idx = codegen_expr(ctx, sub->index);
 
         if (target_type && target_type->kind == TYPE_ARRAY) {
-            target = codegen_lvalue(ctx, sub->target);
+            if (target_type->as.array.size_known) {
+                // target is a pointer to the array [N x T]*
+                LLVMValueRef target = codegen_lvalue(ctx, sub->target);
+                LLVMTypeRef arr_ty = get_llvm_type(ctx, target_type);
+                LLVMValueRef indices[] = {
+                    LLVMConstInt(LLVMInt32TypeInContext(ctx->context), 0, 0),
+                    idx
+                };
+                return LLVMBuildGEP2(ctx->builder, arr_ty, target, indices, 2, "arrayidx");
+            } else {
+                // Fat Pointer (Slice): target is a pointer to the struct {T*, i64}*
+                LLVMValueRef struct_ptr = codegen_lvalue(ctx, sub->target);
+                LLVMTypeRef struct_ty = get_llvm_type(ctx, target_type);
+                
+                // 1. Extract the 'ptr' field (Index 0)
+                LLVMValueRef data_ptr_ptr = LLVMBuildStructGEP2(ctx->builder, struct_ty, struct_ptr, 0, "data_ptr_ptr");
+                LLVMTypeRef elem_ptr_ty = LLVMStructGetTypeAtIndex(struct_ty, 0);
+                LLVMValueRef data_ptr = LLVMBuildLoad2(ctx->builder, elem_ptr_ty, data_ptr_ptr, "data_ptr");
+
+                // 2. GEP from the extracted pointer
+                LLVMTypeRef elem_ty = get_llvm_type(ctx, target_type->as.array.base);
+                return LLVMBuildGEP2(ctx->builder, elem_ty, data_ptr, &idx, 1, "arrayidx");
+            }
         } else {
-            target = codegen_expr(ctx, sub->target);
+            // Pointer: target is the pointer itself (T*)
+            LLVMValueRef target = codegen_expr(ctx, sub->target);
+            LLVMTypeRef elem_ty = (target_type && target_type->kind == TYPE_POINTER)
+                                  ? get_llvm_type(ctx, target_type->as.ptr.base)
+                                  : LLVMInt32TypeInContext(ctx->context);
+            return LLVMBuildGEP2(ctx->builder, elem_ty, target, &idx, 1, "arrayidx");
         }
+    }
 
-        LLVMValueRef idx    = codegen_expr(ctx, sub->index);
-        if (!target || !idx) return NULL;
+    if (expr->node_type == AST_MEMBER_EXPR) {
+        AstMemberExpr *mem_expr = &expr->data.member_expr;
+        Type *target_type = mem_expr->target->type;
 
-        if (target_type && target_type->kind == TYPE_ARRAY && target_type->as.array.size_known) {
-            LLVMTypeRef arr_ty = get_llvm_type(ctx, target_type);
-            LLVMValueRef indices[] = {
-                LLVMConstInt(LLVMInt32TypeInContext(ctx->context), 0, 0),
-                idx
-            };
-            return LLVMBuildGEP2(ctx->builder, arr_ty, target, indices, 2, "arrayidx");
+        if (target_type->kind == TYPE_ARRAY) {
+             if (target_type->as.array.size_known) {
+                 return NULL;
+             }
+             
+             LLVMValueRef target_lvalue = codegen_lvalue(ctx, mem_expr->target);
+             if (!target_lvalue) return NULL;
+             LLVMTypeRef struct_ty = get_llvm_type(ctx, target_type);
+             // Index 1 for 'len'
+             return LLVMBuildStructGEP2(ctx->builder, struct_ty, target_lvalue, 1, "len_gep");
         }
-
-        /* Pointer / unsized-array: single-index GEP over element type. */
-        LLVMTypeRef elem_ty = NULL;
-        if (target_type && target_type->kind == TYPE_POINTER) {
-            elem_ty = get_llvm_type(ctx, target_type->as.ptr.base);
-        } else {
-            elem_ty = LLVMInt32TypeInContext(ctx->context);
-        }
-        LLVMValueRef indices[] = { idx };
-        return LLVMBuildGEP2(ctx->builder, elem_ty, target, indices, 1, "arrayidx");
     }
 
     if (expr->node_type == AST_UNARY_EXPR && expr->data.unary_expr.op == OP_DEREF) {
