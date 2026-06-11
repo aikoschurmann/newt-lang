@@ -167,9 +167,13 @@ int main(int argc, char **argv) {
     double t5 = now_seconds();
     double t_run = 0;
     int program_exit_code = 0;
-    CodegenContext *cg_ctx = codegen_context_create(program, "main_module");
+    CodegenContext *cg_ctx = codegen_context_create(program, store, "main_module");
     if (codegen_program(cg_ctx) == 0) {
         // Successfully generated IR
+        if (opts.run_executable || opts.print_ast || opts.print_types) {
+             codegen_dump_module(cg_ctx);
+        }
+
         char obj_path[256];
         snprintf(obj_path, sizeof(obj_path), "%s.o", opts.output_name);
         codegen_emit_object(cg_ctx, obj_path);

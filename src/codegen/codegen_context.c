@@ -26,9 +26,10 @@ LLVMValueRef codegen_map_get(CodegenMap *m, void *key) {
     return NULL;
 }
 
-CodegenContext* codegen_context_create(AstNode *program, const char *module_name) {
+CodegenContext* codegen_context_create(AstNode *program, TypeStore *store, const char *module_name) {  
     CodegenContext *ctx = malloc(sizeof(CodegenContext));
     ctx->program = program;
+    ctx->store = store;
     ctx->context = LLVMContextCreate();
     ctx->module = LLVMModuleCreateWithNameInContext(module_name, ctx->context);
     ctx->builder = LLVMCreateBuilderInContext(ctx->context);

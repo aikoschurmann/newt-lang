@@ -27,8 +27,6 @@ void codegen_decl_proto(CodegenContext *ctx, AstNode *decl) {
             allocated_name = strndup(s->ptr, s->len);
             name = allocated_name;
         }
-        if (strcmp(name, "main") == 0)
-            ret_type = LLVMInt32TypeInContext(ctx->context);
 
         LLVMTypeRef func_type = LLVMFunctionType(ret_type, param_types, param_count, 0);
         LLVMAddFunction(ctx->module, name, func_type);

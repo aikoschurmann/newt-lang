@@ -20,6 +20,7 @@ typedef struct CodegenMap {
 
 struct CodegenContext {
     AstNode *program;
+    TypeStore *store;
     LLVMContextRef context;
     LLVMModuleRef module;
     LLVMBuilderRef builder;

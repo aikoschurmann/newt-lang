@@ -22,7 +22,12 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
             if (t->as.array.size_known) {
                 return LLVMArrayType(get_llvm_type(ctx, t->as.array.base), t->as.array.size);
             } else {
-                return LLVMPointerTypeInContext(ctx->context, 0);
+                // FAT POINTER (Slice): struct { T* ptr, i64 len }
+                LLVMTypeRef elements[] = {
+                    LLVMPointerTypeInContext(ctx->context, 0),
+                    LLVMInt64TypeInContext(ctx->context)
+                };
+                return LLVMStructTypeInContext(ctx->context, elements, 2, 0);
             }
         case TYPE_FUNCTION: {
             LLVMTypeRef ret_type = get_llvm_type(ctx, t->as.func.return_type);

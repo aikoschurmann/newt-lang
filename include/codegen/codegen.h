@@ -7,7 +7,7 @@
 // but since we return it or use it, we can just define a struct.
 typedef struct CodegenContext CodegenContext;
 
-CodegenContext* codegen_context_create(AstNode *program, const char *module_name);
+CodegenContext* codegen_context_create(AstNode *program, TypeStore *store, const char *module_name);
 void codegen_context_destroy(CodegenContext *ctx);
 
 // Generates LLVM IR for the program. Returns 0 on success.
