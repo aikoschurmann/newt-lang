@@ -74,6 +74,23 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
              // Index 1 for 'len'
              return LLVMBuildStructGEP2(ctx->builder, struct_ty, target_lvalue, 1, "len_gep");
         }
+
+        Type *underlying = target_type;
+        if (underlying->kind == TYPE_POINTER) underlying = underlying->as.ptr.base;
+
+        if (underlying->kind == TYPE_STRUCT) {
+            LLVMValueRef target_lvalue = codegen_lvalue(ctx, mem_expr->target);
+            if (!target_lvalue) return NULL;
+
+            // If target was a pointer, we need to load it first to get the struct pointer
+            if (target_type->kind == TYPE_POINTER) {
+                LLVMTypeRef ptr_ty = get_llvm_type(ctx, target_type);
+                target_lvalue = LLVMBuildLoad2(ctx->builder, ptr_ty, target_lvalue, "deref_ptr");
+            }
+
+            LLVMTypeRef struct_ty = get_llvm_type(ctx, underlying);
+            return LLVMBuildStructGEP2(ctx->builder, struct_ty, target_lvalue, mem_expr->field_index, "field_gep");
+        }
     }
 
     if (expr->node_type == AST_UNARY_EXPR && expr->data.unary_expr.op == OP_DEREF) {

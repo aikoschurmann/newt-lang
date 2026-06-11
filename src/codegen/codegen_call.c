@@ -90,7 +90,7 @@ LLVMValueRef codegen_expr_call(CodegenContext *ctx, AstNode *expr) {
     if (arg_count > 0) {
         args = malloc(sizeof(LLVMValueRef) * arg_count);
 
-        LLVMTypeRef  func_type_pre  = get_llvm_type(ctx, call->callee->type);
+        LLVMTypeRef  func_type_pre  = get_llvm_function_type(ctx, call->callee->type);
         LLVMTypeRef *param_types    = malloc(sizeof(LLVMTypeRef) * arg_count);
         LLVMGetParamTypes(func_type_pre, param_types);
 
@@ -107,7 +107,7 @@ LLVMValueRef codegen_expr_call(CodegenContext *ctx, AstNode *expr) {
         free(param_types);
     }
 
-    LLVMTypeRef func_type = get_llvm_type(ctx, call->callee->type);
+    LLVMTypeRef func_type = get_llvm_function_type(ctx, call->callee->type);
     LLVMTypeRef ret_ty    = LLVMGetReturnType(func_type);
     const char *call_name = (LLVMGetTypeKind(ret_ty) == LLVMVoidTypeKind) ? "" : "calltmp";
 

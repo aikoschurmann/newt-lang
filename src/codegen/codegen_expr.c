@@ -63,8 +63,70 @@ LLVMValueRef codegen_expr_member(CodegenContext *ctx, AstNode *expr) {
         return LLVMBuildLoad2(ctx->builder, LLVMInt64TypeInContext(ctx->context), len_ptr, "len_val");
     }
     
-    // Future: TYPE_STRUCT handling goes here.
+    Type *underlying = target_type;
+    if (underlying->kind == TYPE_POINTER) underlying = underlying->as.ptr.base;
+
+    if (underlying->kind == TYPE_STRUCT) {
+        LLVMValueRef target_lvalue = codegen_lvalue(ctx, mem_expr->target);
+        if (!target_lvalue) return NULL;
+
+        // If target was a pointer, we need to load it first to get the struct pointer
+        if (target_type->kind == TYPE_POINTER) {
+            LLVMTypeRef ptr_ty = get_llvm_type(ctx, target_type);
+            target_lvalue = LLVMBuildLoad2(ctx->builder, ptr_ty, target_lvalue, "deref_ptr");
+        }
+
+        LLVMTypeRef struct_ty = get_llvm_type(ctx, underlying);
+        LLVMValueRef field_ptr = LLVMBuildStructGEP2(ctx->builder, struct_ty, target_lvalue, mem_expr->field_index, "field_gep");
+        
+        LLVMTypeRef field_ty = get_llvm_type(ctx, expr->type);
+        return LLVMBuildLoad2(ctx->builder, field_ty, field_ptr, "field_val");
+    }
+
     return NULL;
+}
+
+LLVMValueRef codegen_expr_struct_literal(CodegenContext *ctx, AstNode *expr) {
+    AstStructLiteral *lit = &expr->data.struct_literal;
+    size_t count = lit->fields ? lit->fields->count : 0;
+    LLVMTypeRef struct_ty = get_llvm_type(ctx, expr->type);
+
+    size_t field_count = expr->type->as.struct_type.field_count;
+    LLVMValueRef *vals = malloc(sizeof(LLVMValueRef) * field_count);
+    bool all_const = true;
+
+    for (size_t i = 0; i < field_count; i++) {
+        vals[i] = NULL;
+        InternResult *name = expr->type->as.struct_type.fields[i].name;
+        for (size_t j = 0; j < count; j++) {
+            AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, j);
+            if (init->name == name) {
+                vals[i] = codegen_expr(ctx, init->expr);
+                break;
+            }
+        }
+        if (!vals[i]) {
+            vals[i] = LLVMConstNull(get_llvm_type(ctx, expr->type->as.struct_type.fields[i].type));
+        }
+        if (!LLVMIsAConstant(vals[i])) {
+            all_const = false;
+        }
+    }
+
+    if (all_const) {
+        LLVMValueRef res = LLVMConstNamedStruct(struct_ty, vals, (unsigned int)field_count);
+        free(vals);
+        return res;
+    }
+
+    LLVMValueRef alloca = LLVMBuildAlloca(ctx->builder, struct_ty, "struct_tmp");
+    for (size_t i = 0; i < field_count; i++) {
+        LLVMValueRef gep = LLVMBuildStructGEP2(ctx->builder, struct_ty, alloca, (unsigned int)i, "field_ptr");
+        LLVMBuildStore(ctx->builder, vals[i], gep);
+    }
+    
+    free(vals);
+    return LLVMBuildLoad2(ctx->builder, struct_ty, alloca, "struct_val");
 }
 
 LLVMValueRef codegen_expr(CodegenContext *ctx, AstNode *expr) {
@@ -74,6 +136,7 @@ LLVMValueRef codegen_expr(CodegenContext *ctx, AstNode *expr) {
         case AST_LITERAL:          return codegen_expr_literal(ctx, expr);
         case AST_IDENTIFIER:       return codegen_expr_ident(ctx, expr);
         case AST_MEMBER_EXPR:      return codegen_expr_member(ctx, expr);
+        case AST_STRUCT_LITERAL:   return codegen_expr_struct_literal(ctx, expr);
         case AST_SUBSCRIPT_EXPR: {
             LLVMValueRef ptr = codegen_lvalue(ctx, expr);
             if (!ptr) return NULL;

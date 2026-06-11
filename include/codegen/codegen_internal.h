@@ -38,6 +38,7 @@ void          codegen_map_put(CodegenMap *m, void *key, LLVMValueRef val);
 LLVMValueRef  codegen_map_get(CodegenMap *m, void *key);
 
 LLVMTypeRef  get_llvm_type(CodegenContext *ctx, Type *t);
+LLVMTypeRef  get_llvm_function_type(CodegenContext *ctx, Type *t);
 LLVMValueRef codegen_expr(CodegenContext *ctx, AstNode *expr);
 LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr);
 

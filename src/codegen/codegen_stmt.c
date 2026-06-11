@@ -52,9 +52,13 @@ LLVMValueRef codegen_expr_stmt(CodegenContext *ctx, AstNode *expr) {
         AstInitializeList *init  = &expr->data.initializer_list;
         size_t             count = init->elements->count;
         LLVMValueRef *vals = malloc(sizeof(LLVMValueRef) * count);
+        bool all_const = true;
 
         for (size_t i = 0; i < count; i++) {
             vals[i] = codegen_expr(ctx, *(AstNode**)dynarray_get(init->elements, i));
+            if (!vals[i] || !LLVMIsAConstant(vals[i])) {
+                all_const = false;
+            }
         }
 
         LLVMTypeRef  ty  = get_llvm_type(ctx, expr->type);
@@ -62,7 +66,22 @@ LLVMValueRef codegen_expr_stmt(CodegenContext *ctx, AstNode *expr) {
 
         if (LLVMGetTypeKind(ty) == LLVMArrayTypeKind) {
             LLVMTypeRef elem_ty = LLVMGetElementType(ty);
-            res = LLVMConstArray(elem_ty, vals, count);
+            if (all_const) {
+                res = LLVMConstArray(elem_ty, vals, count);
+            } else {
+                LLVMValueRef alloca = LLVMBuildAlloca(ctx->builder, ty, "array_tmp");
+                for (size_t i = 0; i < count; i++) {
+                    LLVMValueRef idxs[2] = {
+                        LLVMConstInt(LLVMInt32TypeInContext(ctx->context), 0, 0),
+                        LLVMConstInt(LLVMInt32TypeInContext(ctx->context), (unsigned long long)i, 0)
+                    };
+                    LLVMValueRef gep = LLVMBuildGEP2(ctx->builder, ty, alloca, idxs, 2, "elem_ptr");
+                    if (vals[i]) {
+                        LLVMBuildStore(ctx->builder, vals[i], gep);
+                    }
+                }
+                res = LLVMBuildLoad2(ctx->builder, ty, alloca, "array_val");
+            }
         }
         free(vals);
         return res;
