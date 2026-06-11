@@ -9,6 +9,7 @@
 #define COL_YELLOW  "\033[1;33m"
 #define COL_MAGENTA "\033[1;35m"
 #define COL_BOLD    "\033[1m"
+#define COL_DIM     "\033[2m"
 
 static const char* op_kind_to_str(OpKind op) {
     switch (op) {
@@ -27,8 +28,19 @@ static const char* op_kind_to_str(OpKind op) {
         case OP_OR:  return "||";
         case OP_NOT: return "!";
         case OP_ASSIGN: return "=";
+        case OP_PLUS_EQ: return "+=";
+        case OP_MINUS_EQ: return "-=";
+        case OP_MUL_EQ: return "*=";
+        case OP_DIV_EQ: return "/=";
+        case OP_MOD_EQ: return "%=";
         default: return "?";
     }
+}
+
+static void print_type_quoted(FILE *f, const Type *type) {
+    fprintf(f, "'%s", COL_YELLOW);
+    type_print(f, type);
+    fprintf(f, "%s'", COL_RESET);
 }
 
 void print_type_error(TypeError *err) {
@@ -45,7 +57,7 @@ void print_type_error(TypeError *err) {
             fprintf(stderr, "Unknown type '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
             break;
         case TE_INCOMPLETE_TYPE:
-             fprintf(stderr, "Incomplete type: %s%s%s.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+             fprintf(stderr, "Incomplete type: '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
              break;
         case TE_REDECLARATION:
             fprintf(stderr, "Redefinition of symbol '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
@@ -54,80 +66,82 @@ void print_type_error(TypeError *err) {
             fprintf(stderr, "Use of undeclared identifier '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
             break;
         case TE_TYPE_MISMATCH:
-            fprintf(stderr, "Type mismatch expected: ");
-            type_print(stderr, err->as.mismatch.expected);
-            fprintf(stderr, " but found: ");
-            if (err->as.mismatch.actual) type_print(stderr, err->as.mismatch.actual);
+            fprintf(stderr, "Type mismatch: expected ");
+            print_type_quoted(stderr, err->as.mismatch.expected);
+            fprintf(stderr, " but found ");
+            if (err->as.mismatch.actual) print_type_quoted(stderr, err->as.mismatch.actual);
             else fprintf(stderr, "unknown/invalid");
-            fprintf(stderr, "\n");
+            fprintf(stderr, ".\n");
             break;
-        
-        // NEW ERROR MESSAGES
+
         case TE_DIMENSION_MISMATCH:
-            fprintf(stderr, "Dimension mismatch: Expected ndim %d, but got ndim %d.\n", 
+            fprintf(stderr, "Dimension mismatch: expected %d dimensions, but got %d.\n", 
                 err->as.dims.expected_ndim, err->as.dims.actual_ndim);
             break;
         case TE_ARRAY_SIZE_MISMATCH:
-            fprintf(stderr, "Array size mismatch: Dimension has size %zu, but initializer has size %zu.\n", 
+            fprintf(stderr, "Array size mismatch: dimension has size %zu, but initializer has size %zu.\n", 
                 err->as.size.expected_size, err->as.size.actual_size);
             break;
         case TE_INDEX_OUT_OF_BOUNDS:
-            fprintf(stderr, "Array index out of bounds: Index %zu is >= Array Size %zu.\n", 
+            fprintf(stderr, "Array index out of bounds: index %zu is >= array size %zu.\n", 
                  err->as.size.actual_size, err->as.size.expected_size);
             break;
         case TE_EXPECTED_ARRAY:
-            fprintf(stderr, "Type mismatch: Expected array type '");
-            type_print(stderr, err->as.mismatch.expected);
-            fprintf(stderr, "', but found scalar expression of type '");
-            if (err->as.mismatch.actual) type_print(stderr, err->as.mismatch.actual);
+            fprintf(stderr, "Type mismatch: expected array type ");
+            print_type_quoted(stderr, err->as.mismatch.expected);
+            fprintf(stderr, ", but found scalar expression of type ");
+            if (err->as.mismatch.actual) print_type_quoted(stderr, err->as.mismatch.actual);
             else fprintf(stderr, "unknown");
-            fprintf(stderr, "'.\n");
+            fprintf(stderr, ".\n");
             break;
         case TE_UNEXPECTED_LIST:
-            fprintf(stderr, "Type mismatch: Expected scalar type '");
-            type_print(stderr, err->as.mismatch.expected);
-            fprintf(stderr, "', but found an initializer list.\n");
+            fprintf(stderr, "Type mismatch: expected scalar type ");
+            print_type_quoted(stderr, err->as.mismatch.expected);
+            fprintf(stderr, ", but found an initializer list.\n");
             break;
 
         case TE_RETURN_MISMATCH:
-            fprintf(stderr, "Function return type mismatch expected: ");
-            type_print(stderr, err->as.mismatch.expected);
-            fprintf(stderr, " but found: ");
-            type_print(stderr, err->as.mismatch.actual);
-            fprintf(stderr, "\n");
+            fprintf(stderr, "Function return type mismatch: expected ");
+            print_type_quoted(stderr, err->as.mismatch.expected);
+            fprintf(stderr, " but found ");
+            print_type_quoted(stderr, err->as.mismatch.actual);
+            fprintf(stderr, ".\n");
             break;
         case TE_VARIABLE_TYPE_RESOLUTION_FAILED:
             fprintf(stderr, "Failed to resolve type for variable '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
             break;
         case TE_BINOP_MISMATCH:
             fprintf(stderr, "Invalid operands for binary operator '%s%s%s'. Left: ", COL_MAGENTA, op_kind_to_str(err->as.binop.op), COL_RESET);
-            type_print(stderr, err->as.binop.left);
+            print_type_quoted(stderr, err->as.binop.left);
             fprintf(stderr, " Right: ");
-            type_print(stderr, err->as.binop.right);
-            fprintf(stderr, "\n");
+            print_type_quoted(stderr, err->as.binop.right);
+            fprintf(stderr, ".\n");
             break;
         case TE_UNOP_MISMATCH:
             fprintf(stderr, "Invalid operand for unary operator '%s%s%s'. Operand: ", COL_MAGENTA, op_kind_to_str(err->as.unop.op), COL_RESET);
-            type_print(stderr, err->as.unop.operand);
-            fprintf(stderr, "\n");
+            print_type_quoted(stderr, err->as.unop.operand);
+            fprintf(stderr, ".\n");
             break;
         case TE_NOT_CALLABLE:
-            fprintf(stderr, "Expression of type '");
-            type_print(stderr, err->as.bad_usage.actual);
-            fprintf(stderr, "' is not callable.\n");
+            fprintf(stderr, "Expression of type ");
+            print_type_quoted(stderr, err->as.bad_usage.actual);
+            fprintf(stderr, " is not callable.\n");
             break;
         case TE_NOT_INDEXABLE:
-            fprintf(stderr, "Expression of type '");
-            type_print(stderr, err->as.bad_usage.actual);
-            fprintf(stderr, "' is not indexable.\n");
+            fprintf(stderr, "Expression of type ");
+            print_type_quoted(stderr, err->as.bad_usage.actual);
+            fprintf(stderr, " is not indexable.\n");
             break;
         case TE_FIELD_ACCESS:
-            fprintf(stderr, "Type has no field named '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            fprintf(stderr, "Type ");
+            if (err->as.field.type) print_type_quoted(stderr, err->as.field.type);
+            else fprintf(stderr, "of expression");
+            fprintf(stderr, " has no field named '%s%s%s'.\n", COL_YELLOW, err->as.field.name ? err->as.field.name : "unknown", COL_RESET);
             break;
         case TE_NOT_MEMBER_ACCESSIBLE:
-            fprintf(stderr, "Expression of type '");
-            type_print(stderr, err->as.bad_usage.actual);
-            fprintf(stderr, "' does not support member access.\n");
+            fprintf(stderr, "Expression of type ");
+            print_type_quoted(stderr, err->as.bad_usage.actual);
+            fprintf(stderr, " does not support member access.\n");
             break;
         case TE_CONST_ASSIGN:
              fprintf(stderr, "Cannot assign to immutable variable/parameter.\n");

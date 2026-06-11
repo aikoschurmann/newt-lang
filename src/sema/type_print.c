@@ -89,9 +89,14 @@ static void type_print_internal(FILE *f, const Type *type) {
             }
             break;
 
-        case TYPE_STRUCT:
-             fprintf(f, "struct %s", type->as.user.name ? type->as.user.name : "anonymous");
+        case TYPE_STRUCT: {
+             const char *name = "anonymous";
+             if (type->as.struct_type.name && type->as.struct_type.name->key) {
+                 name = ((Slice*)type->as.struct_type.name->key)->ptr;
+             }
+             fprintf(f, "struct %s", name);
              break;
+        }
         
         default:
             fprintf(f, "unknown");
@@ -132,6 +137,7 @@ static const char* get_kind_color(const Type *type) {
         case TYPE_POINTER:   return COL_KIND_PTR;
         case TYPE_ARRAY:     return COL_KIND_ARR;
         case TYPE_FUNCTION:  return COL_KIND_FUNC;
+        case TYPE_STRUCT:    return COL_STRUCT;
         default:             return COL_KIND_OTHER;
     }
 }

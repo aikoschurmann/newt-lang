@@ -83,6 +83,11 @@ typedef struct {
 
         struct { size_t expected; size_t actual; } arg_count;
 
+        struct {
+            const char *name;
+            Type *type;
+        } field;
+
     } as;
 } TypeError;
 

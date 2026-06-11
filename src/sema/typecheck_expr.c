@@ -336,9 +336,15 @@ Type* check_assignment(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         return NULL;
     }
 
-   
-
     if (!lhs || !rhs) return NULL;
+
+    if (assign->op != OP_ASSIGN) {
+        if (!type_is_numeric(lhs) || !type_is_numeric(rhs)) {
+            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = assign->op, .left = lhs, .right = rhs } };
+            dynarray_push_value(ctx->errors, &err);
+            return NULL;
+        }
+    }
 
     if (lhs != rhs) {
         if (type_can_implicit_cast(lhs, rhs)) {
@@ -604,22 +610,38 @@ Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expe
 
     switch (unary->op) {
         case OP_NOT: 
-            if (operand_type != ctx->store->t_bool) { return NULL; }
+            if (operand_type != ctx->store->t_bool) { 
+                TypeError err = { .kind = TE_UNOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.unop = { .op = unary->op, .operand = operand_type } };
+                dynarray_push_value(ctx->errors, &err);
+                return NULL; 
+            }
             if (unary->expr->is_const_expr) fold_unary_op(expr, unary->op, unary->expr);
             return ctx->store->t_bool;
         case OP_SUB: 
-            if (!type_is_numeric(operand_type)) { return NULL; }
+            if (!type_is_numeric(operand_type)) { 
+                TypeError err = { .kind = TE_UNOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.unop = { .op = unary->op, .operand = operand_type } };
+                dynarray_push_value(ctx->errors, &err);
+                return NULL; 
+            }
             if (unary->expr->is_const_expr) fold_unary_op(expr, unary->op, unary->expr);
             return operand_type;
         case OP_ADRESS: 
-            if (!is_lvalue_node(unary->expr)) { return NULL; }
+            if (!is_lvalue_node(unary->expr)) { 
+                TypeError err = { .kind = TE_NOT_LVALUE, .span = unary->expr->span, .filename = ctx->filename };
+                dynarray_push_value(ctx->errors, &err);
+                return NULL; 
+            }
             {
                 Type proto = { .kind = TYPE_POINTER, .as.ptr.base = operand_type };
                 InternResult *res = intern_type(ctx->store, &proto);
                 return res ? (Type*)((Slice*)res->key)->ptr : NULL;
             }
         case OP_DEREF: 
-            if (operand_type->kind != TYPE_POINTER) { return NULL; }
+            if (operand_type->kind != TYPE_POINTER) { 
+                TypeError err = { .kind = TE_UNOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.unop = { .op = unary->op, .operand = operand_type } };
+                dynarray_push_value(ctx->errors, &err);
+                return NULL; 
+            }
             return operand_type->as.ptr.base;
         default: return NULL;
     }
@@ -659,9 +681,17 @@ Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *exp
     Type *result_type = NULL;
 
     if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD) {
-        if (!type_is_numeric(lhs) || !type_is_numeric(rhs)) { return NULL; }
+        if (!type_is_numeric(lhs) || !type_is_numeric(rhs)) { 
+            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
+            dynarray_push_value(ctx->errors, &err);
+            return NULL; 
+        }
         result_type = unite_numeric_types(ctx, lhs, rhs);
-        if (!result_type) { return NULL; }
+        if (!result_type) { 
+            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
+            dynarray_push_value(ctx->errors, &err);
+            return NULL; 
+        }
         
         if (lhs != result_type) insert_cast(ctx, bin->left, result_type);
         if (rhs != result_type) insert_cast(ctx, bin->right, result_type);
@@ -671,14 +701,22 @@ Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *exp
         if (!common && (op == OP_EQ || op == OP_NEQ)) {
             if (lhs == rhs && lhs->kind == TYPE_POINTER) common = lhs;
         }
-        if (!common) { return NULL; }
+        if (!common) { 
+            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
+            dynarray_push_value(ctx->errors, &err);
+            return NULL; 
+        }
 
         if (lhs != common) insert_cast(ctx, bin->left, common);
         if (rhs != common) insert_cast(ctx, bin->right, common);
         result_type = ctx->store->t_bool;
     }
     else if (op == OP_AND || op == OP_OR) {
-        if (lhs != ctx->store->t_bool || rhs != ctx->store->t_bool) { return NULL; }
+        if (lhs != ctx->store->t_bool || rhs != ctx->store->t_bool) { 
+            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
+            dynarray_push_value(ctx->errors, &err);
+            return NULL; 
+        }
         result_type = ctx->store->t_bool;
     }
 
@@ -732,7 +770,9 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                 if (member_expr->member && member_expr->member->key) {
                     field_name = ((Slice*)member_expr->member->key)->ptr;
                 }
-                TypeError err = { .kind = TE_FIELD_ACCESS, .span = expr->span, .filename = ctx->filename, .as.name.name = field_name };
+                TypeError err = { .kind = TE_FIELD_ACCESS, .span = expr->span, .filename = ctx->filename };
+                err.as.field.name = field_name;
+                err.as.field.type = underlying;
                 dynarray_push_value(ctx->errors, &err);
                 return NULL;
             }
@@ -750,7 +790,9 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
             if (member_expr->member && member_expr->member->key) {
                 field_name = ((Slice*)member_expr->member->key)->ptr;
             }
-            TypeError err = { .kind = TE_FIELD_ACCESS, .span = expr->span, .filename = ctx->filename, .as.name.name = field_name };
+            TypeError err = { .kind = TE_FIELD_ACCESS, .span = expr->span, .filename = ctx->filename };
+            err.as.field.name = field_name;
+            err.as.field.type = underlying;
             dynarray_push_value(ctx->errors, &err);
             return NULL;
         }
