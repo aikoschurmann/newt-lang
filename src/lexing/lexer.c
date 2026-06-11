@@ -34,6 +34,7 @@ static const struct {
     {"break", TOK_BREAK},
     {"continue", TOK_CONTINUE},
     {"const", TOK_CONST},
+    {"struct", TOK_STRUCT},
     {"i32", TOK_I32},
     {"i64", TOK_I64},
     {"bool", TOK_BOOL},
@@ -526,6 +527,7 @@ const char* token_type_to_string(TokenType type) {
         case TOK_BREAK: return "BREAK";
         case TOK_CONTINUE: return "CONTINUE";
         case TOK_CONST: return "CONST";
+        case TOK_STRUCT: return "STRUCT";
         case TOK_I32: return "I32";
         case TOK_I64: return "I64";
         case TOK_BOOL: return "BOOL";

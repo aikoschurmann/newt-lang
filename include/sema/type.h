@@ -14,7 +14,7 @@ typedef enum {
     TYPE_POINTER,
     TYPE_ARRAY,
     TYPE_FUNCTION,
-    TYPE_STRUCT,    // User defined (not yet implemented)
+    TYPE_STRUCT,    // User defined
     TYPE_ENUM       // User defined (not yet implemented)
 } TypeKind;
 
@@ -26,6 +26,11 @@ typedef enum {
     PRIM_VOID,
     PRIM_STR
 } PrimitiveKind;
+
+typedef struct StructField {
+    InternResult *name;
+    Type *type;
+} StructField;
 
 struct Type {
     TypeKind kind;
@@ -55,7 +60,14 @@ struct Type {
 
         } func;
 
-        // TYPE_STRUCT / TYPE_ENUM
+        // TYPE_STRUCT
+        struct {
+            InternResult *name;
+            StructField *fields;
+            size_t field_count;
+        } struct_type;
+
+        // TYPE_ENUM
         struct {
             char *name;       // Debug name
             Symbol *decl_node; // Link back to the AST/Symbol table for fields

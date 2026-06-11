@@ -9,6 +9,7 @@ static const char *node_type_to_string(AstNodeType type) {
         case AST_VARIABLE_DECLARATION: return "VariableDeclaration";
         case AST_FUNCTION_DECLARATION: return "FunctionDeclaration";
         case AST_PARAM: return "Parameter";
+        case AST_STRUCT_DECLARATION: return "StructDeclaration";
         case AST_BLOCK: return "Block";
         case AST_IF_STATEMENT: return "IfStatement";
         case AST_WHILE_STATEMENT: return "WhileStatement";
@@ -26,7 +27,8 @@ static const char *node_type_to_string(AstNodeType type) {
         case AST_CALL_EXPR: return "CallExpression";
         case AST_SUBSCRIPT_EXPR: return "SubscriptExpression";
         case AST_MEMBER_EXPR: return "MemberExpression";
-        case AST_CAST: return "CastExpression"; /* <--- Added */
+        case AST_STRUCT_LITERAL: return "StructLiteral";
+        case AST_CAST: return "CastExpression";
         case AST_TYPE: return "Type";
         case AST_INITIALIZER_LIST: return "InitializerList";
         default: return "Unknown";
@@ -305,6 +307,72 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
                 }
             }
             break;
+
+        case AST_STRUCT_DECLARATION: {
+            print_tree_prefix(depth + 1, 0);
+            printf("name: ");
+            if (node->data.struct_declaration.intern_result &&
+                node->data.struct_declaration.intern_result->entry && identifiers) {
+                const char *name = interner_get_cstr(identifiers, node->data.struct_declaration.intern_result->entry->dense_index);
+                printf("'%s'", name ? name : "?");
+            } else {
+                printf("(none)");
+            }
+            printf("\n");
+
+            if (node->data.struct_declaration.fields && node->data.struct_declaration.fields->count > 0) {
+                print_tree_prefix(depth + 1, 1);
+                printf("fields:\n");
+                for (size_t i = 0; i < node->data.struct_declaration.fields->count; ++i) {
+                    AstFieldDecl *field = (AstFieldDecl*)dynarray_get(node->data.struct_declaration.fields, i);
+                    
+                    print_tree_prefix(depth + 2, i == node->data.struct_declaration.fields->count - 1);
+                    printf("Field '");
+                    if (field->name && field->name->entry && identifiers) {
+                        const char *fname = interner_get_cstr(identifiers, field->name->entry->dense_index);
+                        printf("%s", fname ? fname : "?");
+                    } else {
+                        printf("?");
+                    }
+                    printf("':\n");
+                    print_ast_with_prefix(field->type, depth + 3, 1, keywords, identifiers, strings);
+                }
+            }
+            break;
+        }
+
+        case AST_STRUCT_LITERAL: {
+            print_tree_prefix(depth + 1, 0);
+            printf("name: ");
+            if (node->data.struct_literal.intern_result &&
+                node->data.struct_literal.intern_result->entry && identifiers) {
+                const char *name = interner_get_cstr(identifiers, node->data.struct_literal.intern_result->entry->dense_index);
+                printf("'%s'", name ? name : "?");
+            } else {
+                printf("(none)");
+            }
+            printf("\n");
+
+            if (node->data.struct_literal.fields && node->data.struct_literal.fields->count > 0) {
+                print_tree_prefix(depth + 1, 1);
+                printf("fields:\n");
+                for (size_t i = 0; i < node->data.struct_literal.fields->count; ++i) {
+                    AstFieldInit *init = (AstFieldInit*)dynarray_get(node->data.struct_literal.fields, i);
+                    
+                    print_tree_prefix(depth + 2, i == node->data.struct_literal.fields->count - 1);
+                    printf("Field '");
+                    if (init->name && init->name->entry && identifiers) {
+                        const char *fname = interner_get_cstr(identifiers, init->name->entry->dense_index);
+                        printf("%s", fname ? fname : "?");
+                    } else {
+                        printf("?");
+                    }
+                    printf("':\n");
+                    print_ast_with_prefix(init->expr, depth + 3, 1, keywords, identifiers, strings);
+                }
+            }
+            break;
+        }
 
         case AST_VARIABLE_DECLARATION: {
             int has_type = node->data.variable_declaration.type != NULL;

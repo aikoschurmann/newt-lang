@@ -527,6 +527,61 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
     return concrete_type;
 }
 
+Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
+    AstStructLiteral *lit = &expr->data.struct_literal;
+
+    Symbol *sym = scope_lookup_symbol(scope, lit->intern_result);
+    if (!sym || sym->kind != SYMBOL_VALUE_TYPE || sym->type->kind != TYPE_STRUCT) {
+        const char *name_str = "<unknown>";
+        if (lit->intern_result && lit->intern_result->key) name_str = ((Slice*)lit->intern_result->key)->ptr;
+        TypeError err = { .kind = TE_UNKNOWN_TYPE, .span = expr->span, .filename = ctx->filename, .as.name.name = name_str };
+        dynarray_push_value(ctx->errors, &err);
+        return NULL;
+    }
+
+    Type *struct_type = sym->type;
+    size_t defined_field_count = struct_type->as.struct_type.field_count;
+    size_t lit_field_count = lit->fields ? lit->fields->count : 0;
+
+    if (lit_field_count != defined_field_count) {
+        TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.arg_count = { .expected = defined_field_count, .actual = lit_field_count } };
+        dynarray_push_value(ctx->errors, &err);
+        return NULL;
+    }
+
+    // Check each field against its definition
+    for (size_t i = 0; i < lit_field_count; i++) {
+        AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, i);
+        StructField *def_field = NULL;
+        for (size_t j = 0; j < defined_field_count; j++) {
+            if (struct_type->as.struct_type.fields[j].name == init->name) {
+                def_field = &struct_type->as.struct_type.fields[j];
+                break;
+            }
+        }
+
+        if (!def_field) {
+            const char *name_str = "<unknown>";
+            if (init->name && init->name->key) name_str = ((Slice*)init->name->key)->ptr;
+            TypeError err = { .kind = TE_FIELD_ACCESS, .span = init->expr->span, .filename = ctx->filename, .as.name.name = name_str };
+            dynarray_push_value(ctx->errors, &err);
+            return NULL;
+        }
+
+        Type *actual_type = check_expression(ctx, scope, init->expr, def_field->type);
+        if (actual_type && actual_type != def_field->type) {
+            if (type_can_implicit_cast(def_field->type, actual_type)) {
+                insert_cast(ctx, init->expr, def_field->type);
+            } else {
+                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = init->expr->span, .filename = ctx->filename, .as.mismatch = { .expected = def_field->type, .actual = actual_type } };
+                dynarray_push_value(ctx->errors, &err);
+            }
+        }
+    }
+
+    return struct_type;
+}
+
 // -----------------------------------------------------------------------------
 // Unary (Updated with Hint)
 // -----------------------------------------------------------------------------
@@ -644,8 +699,13 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     Type *target_type = check_expression(ctx, scope, member_expr->target, NULL);
     if (!target_type) return NULL;
 
+    Type *underlying = target_type;
+    if (underlying->kind == TYPE_POINTER) {
+        underlying = underlying->as.ptr.base;
+    }
+
     // 2. Dispatch based on the type we are accessing
-    switch (target_type->kind) {
+    switch (underlying->kind) {
         
         case TYPE_ARRAY:
             // O(1) Pointer comparison using our pre-interned keyword!
@@ -653,13 +713,13 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                 
                 // If it's a fixed-size array, we do Zero-Cost Abstraction!
                 // Morph the node directly into an Integer Literal.
-                if (target_type->as.array.size_known) {
+                if (underlying->as.array.size_known) {
                     expr->node_type = AST_LITERAL;
                     expr->data.literal.type = INT_LITERAL;
-                    expr->data.literal.value.int_val = target_type->as.array.size;
+                    expr->data.literal.value.int_val = underlying->as.array.size;
                     expr->is_const_expr = 1;
                     expr->const_value.type = INT_LITERAL;
-                    expr->const_value.value.int_val = target_type->as.array.size;
+                    expr->const_value.value.int_val = underlying->as.array.size;
                     expr->type = ctx->store->t_i64;
                     return ctx->store->t_i64;
                 }
@@ -677,11 +737,23 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                 return NULL;
             }
 
-        case TYPE_STRUCT:
-            // FUTURE: look up the field here.
-            // Symbol *field = lookup_struct_field(target_type, member_expr->member);
-            // return field->type;
+        case TYPE_STRUCT: {
+            // Find the field
+            for (size_t i = 0; i < underlying->as.struct_type.field_count; i++) {
+                if (underlying->as.struct_type.fields[i].name == member_expr->member) {
+                    member_expr->field_index = (int)i; // Save for Codegen
+                    return underlying->as.struct_type.fields[i].type;
+                }
+            }
+            
+            const char *field_name = "<unknown>";
+            if (member_expr->member && member_expr->member->key) {
+                field_name = ((Slice*)member_expr->member->key)->ptr;
+            }
+            TypeError err = { .kind = TE_FIELD_ACCESS, .span = expr->span, .filename = ctx->filename, .as.name.name = field_name };
+            dynarray_push_value(ctx->errors, &err);
             return NULL;
+        }
 
         default:
             {
@@ -713,6 +785,9 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
             break;
         case AST_MEMBER_EXPR:
             result_type = check_member_expr(ctx, scope, expr);
+            break;
+        case AST_STRUCT_LITERAL:
+            result_type = check_struct_literal(ctx, scope, expr, expected_type);
             break;
         case AST_BINARY_EXPR:
             result_type = check_binary(ctx, scope, expr, expected_type);

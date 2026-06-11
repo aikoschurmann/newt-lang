@@ -82,13 +82,16 @@ Type *resolve_ast_type(TypeCheckContext *ctx, Scope *scope, AstNode *node) {
                 Type *prim = (Type*)hashmap_get(store->primitive_registry, name_res->key, ptr_hash, ptr_cmp);
                 if (prim) return prim;
                 
-                const char *name_str = ((Slice*)name_res->key)->ptr;
-                fprintf(stderr, "DEBUG: Failed to resolve primitive type '%s' (key=%p)\n", name_str, name_res->key);
-                
                 if (scope) {
                     Symbol *sym = scope_lookup_symbol(scope, name_res);
-                    if (sym && sym->kind == SYMBOL_VALUE_TYPE) return sym->type;
+                    if (sym) {
+                        if (sym->kind == SYMBOL_VALUE_TYPE) return sym->type;
+                        else printf("DEBUG: Found symbol '%s' but kind is %d, expected %d\n", ((Slice*)name_res->key)->ptr, sym->kind, SYMBOL_VALUE_TYPE);
+                    } else {
+                        printf("DEBUG: scope_lookup_symbol returned NULL for '%s'\n", ((Slice*)name_res->key)->ptr);
+                    }
                 }
+                const char *name_str = ((Slice*)name_res->key)->ptr;
                 TypeError err = { .kind = TE_UNKNOWN_TYPE, .span = node->span, .filename = ctx->filename, .as.name.name = name_str };
                 dynarray_push_value(ctx->errors, &err);
             }
@@ -192,6 +195,51 @@ static void resolve_function_decl(TypeCheckContext *ctx, Scope *scope, AstNode *
     InternResult *res = intern_type(ctx->store, &proto);
     if (res) func_node->type = (Type*)((Slice*)res->key)->ptr;
     free(param_types);
+}
+
+void resolve_program_structs(TypeCheckContext *ctx, Scope *global_scope) {
+    if (!ctx || !ctx->program) return;
+    AstProgram *program = &ctx->program->data.program;
+    if (!program->decls) return;
+
+    // Pass 1: Register incomplete struct types
+    for (size_t i = 0; i < program->decls->count; i++) {
+        AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
+        if (!decl || decl->node_type != AST_STRUCT_DECLARATION) continue;
+        
+        AstStructDeclaration *struct_decl = &decl->data.struct_declaration;
+        if (!struct_decl->intern_result) continue;
+
+        Type *struct_type = arena_alloc(ctx->store->arena, sizeof(Type));
+        struct_type->kind = TYPE_STRUCT;
+        struct_type->as.struct_type.name = struct_decl->intern_result;
+        struct_type->as.struct_type.field_count = struct_decl->fields ? struct_decl->fields->count : 0;
+        struct_type->as.struct_type.fields = NULL; // Fill in Pass 2
+        
+        // Don't intern incomplete structs yet, we need to mutate them
+        decl->type = struct_type;
+
+        define_symbol_or_error(ctx, global_scope, struct_decl->intern_result, decl->type, SYMBOL_VALUE_TYPE, decl->span);
+    }
+
+    // Pass 2: Resolve struct fields
+    for (size_t i = 0; i < program->decls->count; i++) {
+        AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
+        if (!decl || decl->node_type != AST_STRUCT_DECLARATION) continue;
+        
+        AstStructDeclaration *struct_decl = &decl->data.struct_declaration;
+        if (!struct_decl->fields || struct_decl->fields->count == 0) continue;
+
+        Type *struct_type = decl->type; 
+        
+        struct_type->as.struct_type.fields = arena_alloc(ctx->store->arena, sizeof(StructField) * struct_type->as.struct_type.field_count);
+        
+        for (size_t j = 0; j < struct_type->as.struct_type.field_count; j++) {
+            AstFieldDecl *fdecl = (AstFieldDecl*)dynarray_get(struct_decl->fields, j);
+            struct_type->as.struct_type.fields[j].name = fdecl->name;
+            struct_type->as.struct_type.fields[j].type = resolve_ast_type(ctx, global_scope, fdecl->type);
+        }
+    }
 }
 
 void resolve_program_functions(TypeCheckContext *ctx, Scope *global_scope) {
@@ -412,6 +460,7 @@ void typecheck_program(TypeCheckContext *ctx) {
     Scope *global_scope = scope_create(scope_arena, NULL, global_count, SCOPE_IDENTIFIERS);  
     
     register_intrinsics(ctx->store, global_scope, ctx->identifiers);
+    resolve_program_structs(ctx, global_scope);
     resolve_program_functions(ctx, global_scope);
 
     AstProgram *program = &ctx->program->data.program;
@@ -422,6 +471,7 @@ void typecheck_program(TypeCheckContext *ctx) {
         switch (decl->node_type) {
             case AST_VARIABLE_DECLARATION: check_variable_declaration(ctx, global_scope, decl); break;
             case AST_FUNCTION_DECLARATION: check_function(ctx, global_scope, decl); break;
+            case AST_STRUCT_DECLARATION: /* Handled in resolve_program_structs */ break;
             default: break;
         }
     }

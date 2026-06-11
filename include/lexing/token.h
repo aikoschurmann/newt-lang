@@ -81,7 +81,9 @@ typedef enum {
     TOK_IDENTIFIER,
     TOK_COMMENT,
     TOK_EOF,
-    TOK_UNKNOWN
+    TOK_UNKNOWN,
+
+    TOK_STRUCT
 } TokenType;
 
 

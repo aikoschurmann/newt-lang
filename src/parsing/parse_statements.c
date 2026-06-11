@@ -175,10 +175,11 @@ AstNode *parse_declaration(Parser *p, ParseError *err) {
 
     switch (current->type) {
         case TOK_FN: return parse_function_declaration(p, err);
+        case TOK_STRUCT: return parse_struct_declaration(p, err);
         case TOK_CONST:
         case TOK_IDENTIFIER: return parse_declaration_stmt(p, err);
         default:
-            if (err) create_parse_error(err, p, "expected function or variable declaration", current);
+            if (err) create_parse_error(err, p, "expected function, struct or variable declaration", current);
             return NULL;
     }
 }
@@ -187,6 +188,71 @@ AstNode *parse_declaration(Parser *p, ParseError *err) {
 typedef AstNode *(*operand_parser_fn)(Parser *p, ParseError *err);
 
 typedef OpKind (*map_token_to_op_fn)(Token *tok);
+
+AstNode *parse_struct_declaration(Parser *p, ParseError *err) {
+    if (!p) return NULL;
+    Token *struct_kw = consume(p, TOK_STRUCT);
+    if (!struct_kw) return NULL; // Should not happen if called from parse_declaration
+    
+    AstNode *decl = new_node_or_err(p, AST_STRUCT_DECLARATION, err, "out of memory creating struct declaration node");
+    if (!decl) return NULL;
+
+    Token *name_tok = consume(p, TOK_IDENTIFIER);
+    if (!name_tok) {
+        if (err) create_parse_error(err, p, "expected identifier after 'struct'", current_token(p));
+        return NULL;
+    }
+    decl->data.struct_declaration.intern_result = name_tok->record;
+    
+    decl->data.struct_declaration.fields = arena_alloc(p->arena, sizeof(DynArray));
+    if (!decl->data.struct_declaration.fields) {
+        if (err) create_parse_error(err, p, "out of memory allocating struct fields array", current_token(p));
+        return NULL;
+    }
+    dynarray_init_in_arena(decl->data.struct_declaration.fields, p->arena, sizeof(AstFieldDecl), 8);
+
+    if (!consume(p, TOK_LBRACE)) {
+        if (err) create_parse_error(err, p, "expected '{' starting struct body", current_token(p));
+        return NULL;
+    }
+
+    Token *current = current_token(p);
+    while (current && current->type != TOK_RBRACE && current->type != TOK_EOF) {
+        AstFieldDecl field = {0};
+        Token *field_name = consume(p, TOK_IDENTIFIER);
+        if (!field_name) {
+            if (err) create_parse_error(err, p, "expected field name identifier", current_token(p));
+            return NULL;
+        }
+        field.name = field_name->record;
+
+        if (!consume(p, TOK_COLON)) {
+            if (err) create_parse_error(err, p, "expected ':' after field name", current_token(p));
+            return NULL;
+        }
+
+        AstNode *type = parse_type(p, err);
+        if (!type) return NULL;
+        field.type = type;
+
+        if (!consume(p, TOK_SEMICOLON)) {
+            if (err) create_parse_error(err, p, "expected ';' after field type", current_token(p));
+            return NULL;
+        }
+
+        dynarray_push_value(decl->data.struct_declaration.fields, &field);
+        current = current_token(p);
+    }
+
+    Token *rbrace = consume(p, TOK_RBRACE);
+    if (!rbrace) {
+        if (err) create_parse_error(err, p, "expected '}' closing struct body", current_token(p));
+        return NULL;
+    }
+
+    decl->span = span_join(&struct_kw->span, &rbrace->span);
+    return decl;
+}
 
 AstNode *parse_declaration_stmt(Parser *p, ParseError *err) {
     if (!p) return NULL;
@@ -332,43 +398,52 @@ AstNode *parse_function_declaration(Parser *p, ParseError *err) {
     return func_decl;
 }
 
-/* <Type> ::= <TypeAtom> { <ArraySuffix> } { <PointerSuffix> } */
+/* <Type> ::= { <PointerPrefix> } <TypeAtom> { <ArraySuffix> } { <PointerSuffix> } */
 AstNode *parse_type(Parser *p, ParseError *err) {
     if (!p) return NULL;
+
+    /* pointer prefixes (e.g. *i32) */
+    DynArray *prefix_ptrs = alloc_dynarray(p, err, sizeof(Token), 4, "out of memory for pointer prefixes");
+    if (!prefix_ptrs) return NULL;
+
+    Token *token = current_token(p);
+    while (token && token->type == TOK_STAR) {
+        Token *star = consume(p, TOK_STAR);
+        dynarray_push_value(prefix_ptrs, star);
+        token = current_token(p);
+    }
 
     AstNode *base = parse_type_atom(p, err);
     if (!base) return NULL;
 
-    Token *token = current_token(p);
-
-    /* pointer prefixes/suffixes */
-    while (token && token->type == TOK_STAR) {
-        Token *star = consume(p, TOK_STAR);
-        if (!star) { if (err) create_parse_error(err, p, "expected '*'", current_token(p)); return NULL; }
-
+    /* Apply prefix pointers (Right-to-Left) */
+    for (size_t i = prefix_ptrs->count; i > 0; i--) {
+        Token *star = (Token*)dynarray_get(prefix_ptrs, i - 1);
         AstNode *ptr_type = new_node_or_err(p, AST_TYPE, err, "out of memory creating pointer type node");
         if (!ptr_type) return NULL;
 
         ptr_type->data.ast_type.kind = AST_TYPE_PTR;
         ptr_type->data.ast_type.u.ptr.target = base;
-        ptr_type->data.ast_type.span = span_join(&base->span, &star->span);
+        ptr_type->data.ast_type.span = span_join(&star->span, &base->span);
 
         base = ptr_type;
-        token = current_token(p);
     }
+
+    token = current_token(p);
 
     /* arrays: [ <const-expr>? ] */
     /* FIX: Parse dimensions into a list, then wrap REVERSELY (Right-to-Left) */
     DynArray *dims = alloc_dynarray(p, err, sizeof(AstNode*), 4, "out of memory for array dimensions");
     if (!dims) return NULL;
 
+
     while (token && token->type == TOK_LBRACKET) {
         Token *lbr = consume(p, TOK_LBRACKET);
         if (!lbr) { if (err) create_parse_error(err, p, "expected '['", current_token(p)); return NULL; }
 
         AstNode *size_expr = NULL;
-        Token *peek = current_token(p);
-        if (peek && peek->type != TOK_RBRACKET) {
+        Token *peek_tok = current_token(p);
+        if (peek_tok && peek_tok->type != TOK_RBRACKET) {
             size_expr = parse_expression(p, err);
             if (!size_expr && err && err->message) return NULL;
         }
@@ -401,6 +476,8 @@ AstNode *parse_type(Parser *p, ParseError *err) {
         dim_node->span = span_join(&base->span, &dim_node->span);
         base = dim_node;
     }
+
+    token = current_token(p);
 
     /* pointer suffixes again (if any) */
     while (token && token->type == TOK_STAR) {
@@ -454,19 +531,20 @@ AstNode *parse_type_atom(Parser *p, ParseError *err) {
     return type_node;
 }
 
+
 InternResult *get_base_type(Parser *p, ParseError *err) {
     if (!p) return NULL;
     Token *tok = current_token(p);
     if (!tok) { if (err) create_parse_error(err, p, "unexpected end of input while looking for base type", NULL); return NULL; }
 
-    /* base types are contiguous in token enum between TOK_I32 and TOK_CHAR */
-    if (tok->type < TOK_I32 || tok->type > TOK_CHAR) {
-        if (err) create_parse_error(err, p, "expected base type", tok);
-        return NULL;
+    /* base types are contiguous in token enum between TOK_I32 and TOK_CHAR, plus identifiers for structs */
+    if ((tok->type >= TOK_I32 && tok->type <= TOK_CHAR) || tok->type == TOK_IDENTIFIER) {
+        consume(p, tok->type);
+        return tok->record;
     }
 
-    consume(p, tok->type);
-    return tok->record;
+    if (err) create_parse_error(err, p, "expected base type", tok);
+    return NULL;
 }
 
 /* <FunctionType> ::= FN LPAREN [ <TypeList> ] RPAREN [ ARROW <Type> ] */
@@ -905,6 +983,62 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
         }
 
         case TOK_IDENTIFIER: {
+            Token *peek_tok = peek(p, 1);
+            if (peek_tok && peek_tok->type == TOK_LBRACE) {
+                /* Struct literal: IDENTIFIER { field: expr, ... } */
+                AstNode *struct_lit = new_node_or_err(p, AST_STRUCT_LITERAL, err, "out of memory creating struct literal node");
+                if (!struct_lit) return NULL;
+                struct_lit->data.struct_literal.intern_result = token->record;
+                Span start_span = token->span;
+                consume(p, TOK_IDENTIFIER); /* consume name */
+                consume(p, TOK_LBRACE);     /* consume '{' */
+                
+                struct_lit->data.struct_literal.fields = arena_alloc(p->arena, sizeof(DynArray));
+                if (!struct_lit->data.struct_literal.fields) {
+                    if (err) create_parse_error(err, p, "out of memory allocating struct literal fields", current_token(p));
+                    return NULL;
+                }
+                dynarray_init_in_arena(struct_lit->data.struct_literal.fields, p->arena, sizeof(AstFieldInit), 8);
+                
+                Token *current = current_token(p);
+                while (current && current->type != TOK_RBRACE && current->type != TOK_EOF) {
+                    AstFieldInit init = {0};
+                    Token *field_name = consume(p, TOK_IDENTIFIER);
+                    if (!field_name) {
+                        if (err) create_parse_error(err, p, "expected field name in struct literal", current_token(p));
+                        return NULL;
+                    }
+                    init.name = field_name->record;
+                    
+                    if (!consume(p, TOK_COLON)) {
+                        if (err) create_parse_error(err, p, "expected ':' after field name", current_token(p));
+                        return NULL;
+                    }
+                    
+                    init.expr = parse_expression(p, err);
+                    if (!init.expr) return NULL;
+                    
+                    dynarray_push_value(struct_lit->data.struct_literal.fields, &init);
+                    
+                    current = current_token(p);
+                    if (current && current->type == TOK_COMMA) {
+                        consume(p, TOK_COMMA);
+                        current = current_token(p);
+                    } else {
+                        break;
+                    }
+                }
+                
+                Token *rbrace = consume(p, TOK_RBRACE);
+                if (!rbrace) {
+                    if (err) create_parse_error(err, p, "expected '}' or ',' in struct literal", current_token(p));
+                    return NULL;
+                }
+                
+                struct_lit->span = span_join(&start_span, &rbrace->span);
+                return struct_lit;
+            }
+
             AstNode *identifier = new_node_or_err(p, AST_IDENTIFIER, err, "out of memory creating identifier node");
             if (!identifier) return NULL;
             identifier->data.identifier.intern_result = token->record;
@@ -922,6 +1056,9 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
             expr->span = span_join(&lpar->span, &r->span);
             return expr;
         }
+
+        case TOK_LBRACE:
+            return parse_initializer_list(p, err);
 
         default:
 

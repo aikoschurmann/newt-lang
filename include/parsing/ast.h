@@ -20,6 +20,7 @@ typedef enum {
     AST_VARIABLE_DECLARATION,
     AST_FUNCTION_DECLARATION,
     AST_PARAM,
+    AST_STRUCT_DECLARATION,
 
     /* statements */
     AST_BLOCK,
@@ -41,6 +42,7 @@ typedef enum {
     AST_CALL_EXPR,
     AST_SUBSCRIPT_EXPR,
     AST_MEMBER_EXPR,
+    AST_STRUCT_LITERAL,
     
     AST_CAST, /* Explicit cast node (inserted by semantic analysis) */
 
@@ -108,6 +110,16 @@ typedef struct {
 } AstParam;
 
 typedef struct {
+    InternResult *name; // The field name
+    AstNode *type;      // AST_TYPE node
+} AstFieldDecl;
+
+typedef struct {
+    InternResult *intern_result; // Struct name
+    DynArray *fields;            // Contains AstFieldDecl*
+} AstStructDeclaration;
+
+typedef struct {
     DynArray *statements; /* contains AstNode* */
 } AstBlock;
 
@@ -149,7 +161,17 @@ typedef struct { AstNode *expr; OpKind op; } AstPostfixExpr;
 typedef struct { AstNode *lvalue; AstNode *rvalue; OpKind op; } AstAssignmentExpr;
 typedef struct { AstNode *callee; DynArray *args; } AstCallExpr;
 typedef struct { AstNode *target; AstNode *index; } AstSubscriptExpr;
-typedef struct { AstNode *target; InternResult *member; } AstMemberExpr;
+typedef struct { AstNode *target; InternResult *member; int field_index; } AstMemberExpr;
+
+typedef struct {
+    InternResult *name; // The field name
+    AstNode *expr;      // Field initialization expression
+} AstFieldInit;
+
+typedef struct {
+    InternResult *intern_result; // Struct type name
+    DynArray *fields;            // Contains AstFieldInit*
+} AstStructLiteral;
 
 /* New Cast Struct */
 typedef struct {
@@ -205,6 +227,7 @@ struct AstNode {
         AstVariableDeclaration variable_declaration;
         AstFunctionDeclaration function_declaration;
         AstParam param;
+        AstStructDeclaration struct_declaration;
         AstBlock block;
         AstIfStatement if_statement;
         AstWhileStatement while_statement;
@@ -223,6 +246,7 @@ struct AstNode {
         AstCallExpr call_expr;
         AstSubscriptExpr subscript_expr;
         AstMemberExpr member_expr;
+        AstStructLiteral struct_literal;
         AstCastExpr cast_expr;
 
         AstType ast_type;
