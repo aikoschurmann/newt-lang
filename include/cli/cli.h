@@ -9,6 +9,7 @@ typedef struct {
     bool print_types;
     bool run_executable;
     bool quiet;
+    int opt_level;
     const char *output_name;
 } Options;
 

@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
     double t5 = now_seconds();
     double t_run = 0;
     int program_exit_code = 0;
-    CodegenContext *cg_ctx = codegen_context_create(program, store, "main_module");
+    CodegenContext *cg_ctx = codegen_context_create(program, store, "main_module", opts.opt_level);
     if (codegen_program(cg_ctx) == 0) {
         // Successfully generated IR
         if (opts.run_executable || opts.print_ast || opts.print_types) {

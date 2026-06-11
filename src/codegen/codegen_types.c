@@ -27,7 +27,7 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
                 case PRIM_I64:  return LLVMInt64TypeInContext(ctx->context);
                 case PRIM_F32:  return LLVMFloatTypeInContext(ctx->context);
                 case PRIM_F64:  return LLVMDoubleTypeInContext(ctx->context);
-                case PRIM_BOOL: return LLVMInt1TypeInContext(ctx->context);
+                case PRIM_BOOL: return LLVMInt8TypeInContext(ctx->context);
                 case PRIM_CHAR: return LLVMInt8TypeInContext(ctx->context);
                 case PRIM_VOID: return LLVMVoidTypeInContext(ctx->context);
                 case PRIM_STR:  return LLVMPointerTypeInContext(ctx->context, 0);

@@ -26,7 +26,7 @@ LLVMValueRef codegen_map_get(CodegenMap *m, void *key) {
     return NULL;
 }
 
-CodegenContext* codegen_context_create(AstNode *program, TypeStore *store, const char *module_name) {  
+CodegenContext* codegen_context_create(AstNode *program, TypeStore *store, const char *module_name, int opt_level) {  
     CodegenContext *ctx = malloc(sizeof(CodegenContext));
     ctx->program = program;
     ctx->store = store;
@@ -37,6 +37,7 @@ CodegenContext* codegen_context_create(AstNode *program, TypeStore *store, const
     ctx->locals = codegen_map_create(NULL);
     ctx->loop_cond_bb = NULL;
     ctx->loop_end_bb = NULL;
+    ctx->opt_level = opt_level;
     return ctx;
 }
 

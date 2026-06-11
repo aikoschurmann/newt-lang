@@ -28,6 +28,7 @@ struct CodegenContext {
     CodegenMap *locals;
     LLVMBasicBlockRef loop_cond_bb;
     LLVMBasicBlockRef loop_end_bb;
+    int opt_level;
 };
 
 /* --- Internal Helpers --- */

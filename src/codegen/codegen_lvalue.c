@@ -34,7 +34,7 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
                     LLVMConstInt(LLVMInt32TypeInContext(ctx->context), 0, 0),
                     idx
                 };
-                return LLVMBuildGEP2(ctx->builder, arr_ty, target, indices, 2, "arrayidx");
+                return LLVMBuildInBoundsGEP2(ctx->builder, arr_ty, target, indices, 2, "arrayidx");
             } else {
                 // Fat Pointer (Slice): target is a pointer to the struct {T*, i64}*
                 LLVMValueRef struct_ptr = codegen_lvalue(ctx, sub->target);

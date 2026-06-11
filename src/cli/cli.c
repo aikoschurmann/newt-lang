@@ -14,6 +14,7 @@ int parse_options(int argc, char **argv, Options *opts, const char **in_path) {
     opts->print_types = false;
     opts->run_executable = false;
     opts->output_name = "output";
+    opts->opt_level = 0;
 
 #ifdef DEV_BUILD
     opts->print_time = true;
@@ -44,6 +45,17 @@ int parse_options(int argc, char **argv, Options *opts, const char **in_path) {
             opts->print_time = false;
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             opts->quiet = false;
+        } else if (strncmp(argv[i], "-O", 2) == 0) {
+            if (strlen(argv[i]) == 3) {
+                opts->opt_level = argv[i][2] - '0';
+                if (opts->opt_level < 0 || opts->opt_level > 3) {
+                    fprintf(stderr, "Error: Invalid optimization level: %s\n", argv[i]);
+                    return 0;
+                }
+            } else {
+                fprintf(stderr, "Error: -O requires a level (0-3)\n");
+                return 0;
+            }
         } else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) {
                 opts->output_name = argv[++i];
