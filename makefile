@@ -84,10 +84,10 @@ clean:
 	rm -rf $(OBJ_DIR) $(OUT_DIR)
 
 run: release
-	./$(OUT_DIR)/$(NAME) ./input/test.rs --run
+	./$(OUT_DIR)/$(NAME) ./input/test.tn --run
 
 run-dev: dev
-	./$(OUT_DIR)/$(NAME_DEV) ./input/test.rs --run
+	./$(OUT_DIR)/$(NAME_DEV) ./input/test.tn --run
 
 test: $(OUT_DIR)/test_runner
 	./$(OUT_DIR)/test_runner

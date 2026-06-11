@@ -63,6 +63,8 @@ int test_codegen_slice_len_write();
 int test_codegen_fixed_array_len();
 int test_codegen_multi_array_len();
 int test_codegen_multi_array_slice_func();
+int test_codegen_structs();
+int test_codegen_struct_edge_cases();
 
 // Exceptions
 int test_exception_long_identifier();
@@ -137,6 +139,8 @@ int main() {
     run_test("Codegen: Fixed Array Len", test_codegen_fixed_array_len);
     run_test("Codegen: Multi Array Len", test_codegen_multi_array_len);
     run_test("Codegen: Multi Array Slice Func", test_codegen_multi_array_slice_func);
+    run_test("Codegen: Structs", test_codegen_structs);
+    run_test("Codegen: Struct Edge Cases", test_codegen_struct_edge_cases);
 
     // Exceptions & Stress
     run_test("Exception: Long Identifier", test_exception_long_identifier);

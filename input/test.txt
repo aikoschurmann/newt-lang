@@ -1,0 +1,14 @@
+fn swap(a: i32[]*, i: i32, j: i32) {
+    temp: i32 = (*a)[i];
+    (*a)[i] = (*a)[j];
+    (*a)[j] = temp;
+}
+
+fn main() -> i32 {
+    arr: i32[3] = { 3, 1, 2 };
+    //if (arr[0] > arr[1]) { swap(&arr, 0, 1); }
+    //if (arr[1] > arr[2]) { swap(&arr, 1, 2); }
+    //if (arr[0] > arr[1]) { swap(&arr, 0, 1); }
+    print(1);
+    print(arr[0] * 100 + arr[1] * 10 + arr[2]);
+}

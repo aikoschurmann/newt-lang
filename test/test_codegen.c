@@ -287,3 +287,74 @@ int test_codegen_multi_array_slice_func() {
     ASSERT_EQ_INT(code, 10);
     return 1;
 }
+
+int test_codegen_structs() {
+    const char *src =
+        "struct Point { x: i32; y: i32; }\n"
+        "fn main() -> i32 {\n"
+        "    p: Point = Point { x: 10, y: 20 };\n"
+        "    return p.x + p.y;\n"
+        "}\n";
+    int res = run_compiled_code(src);
+    ASSERT_EQ_INT(res, 30);
+    return 1;
+}
+
+int test_codegen_struct_edge_cases() {
+    // Test 1: Nested structs, arrays in structs, and pointers to structs
+    const char *src1 =
+        "struct Inner {\n"
+        "    val: i32;\n"
+        "}\n"
+        "struct Outer {\n"
+        "    arr: i32[3];\n"
+        "    inner: Inner;\n"
+        "    ptr: *Inner;\n"
+        "}\n"
+        "fn main() -> i32 {\n"
+        "    i: Inner = Inner { val: 42 };\n"
+        "    o: Outer = Outer {\n"
+        "        arr:  {1, 2, 3},\n"
+        "        inner: Inner { val: 100 },\n"
+        "        ptr: &i\n"
+        "    };\n"
+        "    // Modify through pointer\n"
+        "    (*o.ptr).val = 50;\n"
+        "    return o.arr[1] + o.inner.val + i.val;\n"
+        "}\n";
+    int res1 = run_compiled_code(src1);
+    ASSERT_EQ_INT(res1, 152); // 2 + 100 + 50 = 152
+    
+    // Test 2: Implicit casting in struct initialization and assignment
+    const char *src2 =
+        "struct Mixed {\n"
+        "    f: f64;\n"
+        "    i: i64;\n"
+        "}\n"
+        "fn main() -> i32 {\n"
+        "    // Initialize with i32, should promote to f64 and i64\n"
+        "    x: i32 = 10;\n"
+        "    m: Mixed = Mixed { f: 5, i: x };\n"
+        "    m.f = m.f + 1.5;\n"
+        "    m.i = m.i * 2;\n"
+        "    if (m.f > 6.0) {\n"
+        "        return m.i; // Should return 20\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n";
+    int res2 = run_compiled_code(src2);
+    ASSERT_EQ_INT(res2, 20);
+    
+    // Test 3: Arrays of structs
+    const char *src3 = 
+        "struct Pair { a: i32; b: i32; }\n"
+        "fn main() -> i32 {\n"
+        "    arr: Pair[2] = { Pair{a: 1, b: 2}, Pair{a: 3, b: 4} };\n"
+        "    arr[1].a = 10;\n"
+        "    return arr[0].b + arr[1].a;\n"
+        "}\n";
+    int res3 = run_compiled_code(src3);
+    ASSERT_EQ_INT(res3, 12); // 2 + 10 = 12
+
+    return 1;
+}

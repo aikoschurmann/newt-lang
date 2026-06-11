@@ -1,0 +1,12 @@
+struct Inner {
+    val: i32;
+}
+struct Outer {
+    arr: i32[3];
+    inner: Inner;
+    ptr: *Inner;
+}
+fn main() -> i32 {
+    i: Inner = Inner { val: 42 };
+    return 152;
+}
