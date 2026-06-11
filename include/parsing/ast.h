@@ -40,6 +40,7 @@ typedef enum {
     AST_ASSIGNMENT_EXPR,
     AST_CALL_EXPR,
     AST_SUBSCRIPT_EXPR,
+    AST_MEMBER_EXPR,
     
     AST_CAST, /* Explicit cast node (inserted by semantic analysis) */
 
@@ -148,6 +149,7 @@ typedef struct { AstNode *expr; OpKind op; } AstPostfixExpr;
 typedef struct { AstNode *lvalue; AstNode *rvalue; OpKind op; } AstAssignmentExpr;
 typedef struct { AstNode *callee; DynArray *args; } AstCallExpr;
 typedef struct { AstNode *target; AstNode *index; } AstSubscriptExpr;
+typedef struct { AstNode *target; InternResult *member; } AstMemberExpr;
 
 /* New Cast Struct */
 typedef struct {
@@ -220,6 +222,7 @@ struct AstNode {
         AstAssignmentExpr assignment_expr;
         AstCallExpr call_expr;
         AstSubscriptExpr subscript_expr;
+        AstMemberExpr member_expr;
         AstCastExpr cast_expr;
 
         AstType ast_type;

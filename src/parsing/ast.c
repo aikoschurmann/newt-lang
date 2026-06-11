@@ -25,6 +25,7 @@ static const char *node_type_to_string(AstNodeType type) {
         case AST_ASSIGNMENT_EXPR: return "AssignmentExpression";
         case AST_CALL_EXPR: return "CallExpression";
         case AST_SUBSCRIPT_EXPR: return "SubscriptExpression";
+        case AST_MEMBER_EXPR: return "MemberExpression";
         case AST_CAST: return "CastExpression"; /* <--- Added */
         case AST_TYPE: return "Type";
         case AST_INITIALIZER_LIST: return "InitializerList";
@@ -127,6 +128,10 @@ int is_lvalue_node(AstNode *node) {
 
         case AST_SUBSCRIPT_EXPR:
             /* a[b] yields an lvalue (array element). */
+            return 1;
+
+        case AST_MEMBER_EXPR:
+            /* a.b yields an lvalue (member access). */
             return 1;
 
         case AST_UNARY_EXPR:
@@ -630,6 +635,24 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
                 printf("index:\n");
                 print_ast_with_prefix(node->data.subscript_expr.index, depth + 2, 1, keywords, identifiers, strings);
             }
+            break;
+
+        case AST_MEMBER_EXPR:
+            if (node->data.member_expr.target) {
+                print_tree_prefix(depth + 1, 0);
+                printf("target:\n");
+                print_ast_with_prefix(node->data.member_expr.target, depth + 2, 0, keywords, identifiers, strings);
+            }
+            print_tree_prefix(depth + 1, 1);
+            printf("member: ");
+            if (node->data.member_expr.member && 
+                node->data.member_expr.member->entry && identifiers) {
+                const char *name = interner_get_cstr(identifiers, node->data.member_expr.member->entry->dense_index);
+                printf("'%s'", name ? name : "?");
+            } else {
+                printf("(unknown)");
+            }
+            printf("\n");
             break;
 
         case AST_CAST: {
