@@ -731,7 +731,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
     if (!primary) return NULL;
 
     Token *token = current_token(p);
-    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN)) {
+    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT)) {
         if (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS) {
             Token *op_tok = token;
             AstNode *postfix = new_node_or_err(p, AST_UNARY_EXPR, err, "out of memory creating postfix node");
@@ -776,6 +776,21 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
             func_call->data.call_expr.callee = primary;
             func_call->span = span_join(&primary->span, &rparen->span);
             primary = func_call;
+        } else if (token->type == TOK_DOT) {
+            consume(p, TOK_DOT);
+            Token *name_tok = consume(p, TOK_IDENTIFIER);
+            if (!name_tok) {
+                if (err) create_parse_error(err, p, "expected identifier after '.'", current_token(p));
+                return NULL;
+            }
+
+            AstNode *member_access = new_node_or_err(p, AST_MEMBER_EXPR, err, "out of memory creating member access node");
+            if (!member_access) return NULL;
+
+            member_access->data.member_expr.target = primary;
+            member_access->data.member_expr.member = name_tok->record;
+            member_access->span = span_join(&primary->span, &name_tok->span);
+            primary = member_access;
         }
 
         token = current_token(p);
