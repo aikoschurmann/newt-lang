@@ -117,7 +117,6 @@ static void count_nodes_recursive(AstNode *node, size_t *count) {
                 count_nodes_recursive(node->data.ast_type.u.ptr.target, count);
             } else if (node->data.ast_type.kind == AST_TYPE_FUNC) {
                 count_nodes_recursive(node->data.ast_type.u.func.return_type, count);
-                // Note: counting param types is skipped for brevity, but can be added
             }
             break;
         default: break; // Leaf nodes (Identifier, Literal, etc.)

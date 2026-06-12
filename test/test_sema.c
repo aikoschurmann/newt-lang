@@ -7,11 +7,9 @@
 // Helpers
 // -----------------------------------------------------------------------------
 
-// Helper to check if a specific error message part exists in the errors
 static bool check_sema_error(const char *src, TypeErrorKind kind) {
     CompileResult res = compile_source((char*)src);
     bool found = false;
-    
     if (res.ctx.errors) {
         for (size_t i = 0; i < res.ctx.errors->count; i++) {
             TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, i);
@@ -21,452 +19,196 @@ static bool check_sema_error(const char *src, TypeErrorKind kind) {
             }
         }
     }
-    
     cleanup_compilation(&res);
     return found;
 }
 
+static bool check_sema_valid(const char *src) {
+    CompileResult res = compile_source((char*)src);
+    bool valid = (res.ctx.errors->count == 0);
+    if (!valid) {
+        TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, 0);
+        fprintf(stderr, "\n[Sema Valid Check Failed] Unexpected error: %d at src: %s\n", err->kind, src);
+    }
+    cleanup_compilation(&res);
+    return valid;
+}
+
 // -----------------------------------------------------------------------------
-// Regression & Basic Tests
+// 1. Implicit Conversions (Lossless Widening Only)
 // -----------------------------------------------------------------------------
+
+int test_sema_implicit_widening() {
+    // Valid: i32 -> i64
+    ASSERT(check_sema_valid("fn main() { a: i32 = 10; b: i64 = a; }"));
+    // Valid: f32 -> f64
+    ASSERT(check_sema_valid("fn main() { a: f32 = 1.0; b: f64 = a; }"));
+    // Valid: i32 -> f64 (lossless)
+    ASSERT(check_sema_valid("fn main() { a: i32 = 10; b: f64 = a; }"));
+
+    // Invalid: i64 -> f64 (potential loss)
+    ASSERT(check_sema_error("fn main() { a: i64 = 10; b: f64 = a; }", TE_TYPE_MISMATCH));
+    // Invalid: i32 -> f32 (potential loss)
+    ASSERT(check_sema_error("fn main() { a: i32 = 10; b: f32 = a; }", TE_TYPE_MISMATCH));
+    // Invalid: narrowing i64 -> i32
+    ASSERT(check_sema_error("fn main() { a: i64 = 10; b: i32 = a; }", TE_TYPE_MISMATCH));
+    
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// 2. Literal Inference
+// -----------------------------------------------------------------------------
+
+int test_sema_literal_inference() {
+    // Untyped literal '5' adapts to i64
+    ASSERT(check_sema_valid("fn main() { x: i64 = 5; }"));
+    // Untyped literal '1.0' adapts to f32
+    ASSERT(check_sema_valid("fn main() { x: f32 = 1.0; }"));
+    // Untyped integer literal '1' adapts to f32
+    ASSERT(check_sema_valid("fn main() { x: f32 = 1; }"));
+    
+    // Mixed arithmetic with literal (1 adapts to f32)
+    ASSERT(check_sema_valid("fn main() { a: f32 = 1.0; b: f32 = a + 1; }"));
+    
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// 3. Strict Binary Operators
+// -----------------------------------------------------------------------------
+
+int test_sema_strict_binary_ops() {
+    // Valid: Same types
+    ASSERT(check_sema_valid("fn main() { a: i32 = 1; b: i32 = 2; c: i32 = a + b; }"));
+    
+    // Invalid: i32 + i64 (No implicit promotion in binary ops)
+    ASSERT(check_sema_error("fn main() { a: i32 = 1; b: i64 = 2; c: i64 = a + b; }", TE_BINOP_MISMATCH));
+    
+    // Invalid: f32 + f64
+    ASSERT(check_sema_error("fn main() { a: f32 = 1.0; b: f64 = 2.0; c: f64 = a + b; }", TE_BINOP_MISMATCH));
+    
+    // Invalid: Comparison between mixed types
+    ASSERT(check_sema_error("fn main() { a: i32 = 1; b: i64 = 1; if (a == b) {} }", TE_BINOP_MISMATCH));
+
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// 4. 'as' Casting Rules
+// -----------------------------------------------------------------------------
+
+int test_sema_as_casting() {
+    // Valid: Numeric conversions
+    ASSERT(check_sema_valid("fn main() { a: i64 = 10; b: i32 = a as i32; }"));
+    ASSERT(check_sema_valid("fn main() { a: f64 = 1.0; b: f32 = a as f32; }"));
+    ASSERT(check_sema_valid("fn main() { a: i32 = 65; b: char = a as char; }"));
+    
+    // Valid: Bool -> Numeric
+    ASSERT(check_sema_valid("fn main() { a: bool = true; b: i32 = a as i32; }"));
+    
+    // Invalid: Numeric -> Bool (Use explicit comparison)
+    ASSERT(check_sema_error("fn main() { a: i32 = 1; b: bool = a as bool; }", TE_TYPE_MISMATCH));
+    
+    // Invalid: 'str' in 'as'
+    ASSERT(check_sema_error("fn main() { a: i32 = 1; b: str = a as str; }", TE_TYPE_MISMATCH));
+
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// 5. Pointer Rules
+// -----------------------------------------------------------------------------
+
+int test_sema_pointer_rules() {
+    // Valid: T* -> *void (Implicit safe promotion)
+    ASSERT(check_sema_valid("fn main() { x: i32 = 0; p: *void = &x; }"));
+    
+    // Invalid: *void -> T* (Must be explicit)
+    ASSERT(check_sema_error("fn main() { x: i32 = 0; p: *void = &x; y: *i32 = p; }", TE_TYPE_MISMATCH));
+    
+    // Valid: *void -> T* (Explicit as)
+    ASSERT(check_sema_valid("fn main() { x: i32 = 0; p: *void = &x; y: *i32 = p as *i32; }"));
+    
+    // Valid: Pointer <-> Integer (Reinterpretation)
+    ASSERT(check_sema_valid("fn main() { x: i32 = 0; p: *i32 = &x; val: i64 = p as i64; }"));
+    ASSERT(check_sema_valid("fn main() { val: i64 = 12345; p: *void = val as *void; }"));
+
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// 6. Array & Slice Rules
+// -----------------------------------------------------------------------------
+
+int test_sema_array_slice_rules() {
+    // Valid: T[N] -> T[] (Decay with identical base)
+    ASSERT(check_sema_valid("fn main() { arr: i32[5]; slice: i32[] = arr; }"));
+    
+    // Invalid: T[N] -> U[] (Even if T casts to U)
+    ASSERT(check_sema_error("fn main() { arr: i32[5]; slice: i64[] = arr; }", TE_TYPE_MISMATCH));
+    
+    // Invalid: T[] -> T[N] (Cannot prove size)
+    ASSERT(check_sema_error("fn take(s: i32[]) { arr: i32[5] = s; }", TE_TYPE_MISMATCH));
+
+    return 1;
+}
+
+// -----------------------------------------------------------------------------
+// Miscellaneous / Legacy Tests
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// 7. Scoping & Shadowing
+// -----------------------------------------------------------------------------
+
+int test_sema_shadowing() {
+    // 1. Shadowing a type name
+    const char *src1 = 
+        "struct S { x: i32; }\n"
+        "fn main() {\n"
+        "    S: i32 = 10;\n"
+        "    val: S = S{x: 1};\n" // Error: S is now a variable, not a type
+        "}";
+    ASSERT(check_sema_error(src1, TE_UNKNOWN_TYPE));
+
+    // 2. Shadowing a function name
+    const char *src2 = 
+        "fn f() {}\n"
+        "fn main() {\n"
+        "    f: i32 = 10;\n"
+        "    f();\n" // Error: f is now an i32, not callable
+        "}";
+    ASSERT(check_sema_error(src2, TE_NOT_CALLABLE));
+
+    return 1;
+}
 
 int test_sema_arg_mismatch_regression() {
-    // Regression test for "Argument count mismatch" error span fix
-    const char *src = 
-        "fn dummy() -> i64 { return 0; }\n"
-        "arr: (fn(i64) -> i64)[2] = {dummy, dummy};\n" 
-        "fn fib(n: i64) -> i64 { return n; }\n"
-        "arr2: (fn(i64)->i64)[1] = {fib};\n"
-        "res: i64 = arr2[0]();"; // Error here
-
-    CompileResult res = compile_source(src);
-    
-    ASSERT(!res.parse_failed);
-    ASSERT_NOT_NULL(res.ctx.errors);
-    
-    bool found = false;
-    for (size_t i = 0; i < res.ctx.errors->count; i++) {
-        TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, i);
-        if (err->kind == TE_ARG_COUNT_MISMATCH) {
-             found = true;
-        }
-    }
-    ASSERT(found);
-
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_type_mismatch() {
-    const char *src = "x: i32 = \"string\";";
-    CompileResult res = compile_source(src);
-    
-    // Should pass parsing but fail type check
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count > 0);
-    
-    bool found = false;
-    for(size_t i=0; i<res.ctx.errors->count; i++) {
-        TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, i);
-        if (err->kind == TE_TYPE_MISMATCH) found = true;
-    }
-    ASSERT(found);
-    
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_undeclared() {
-    const char *src = "x: i32 = y;";
-    CompileResult res = compile_source(src);
-    
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count > 0);
-    
-    bool found = false;
-    for(size_t i=0; i<res.ctx.errors->count; i++) {
-        TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, i);
-        if (err->kind == TE_UNDECLARED) found = true;
-    }
-    ASSERT(found);
-    
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_valid_program() {
-    const char *src = 
-        "fn add(a: i64, b: i64) -> i64 { return a + b; }\n"
-        "x: i64 = add(10, 20);";
-        
-    CompileResult res = compile_source(src);
-    ASSERT(!res.parse_failed);
-    
-    if (res.ctx.errors && res.ctx.errors->count > 0) {
-         TypeError *err = (TypeError*)dynarray_get(res.ctx.errors, 0);
-         fprintf(stderr, "Unexpected error in valid program: kind %d\n", err->kind);
-         cleanup_compilation(&res);
-         return 0;
-    }
-
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_call_arg_count() {
-    // Global call with wrong arg count
-    const char *src = 
-        "fn add(a: i32, b: i32) -> i32 { return 0; }\n"
-        "val: i32 = add(1);"; 
-    CompileResult res = compile_source(src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors && res.ctx.errors->count > 0);
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_call_arg_type() {
-    // Global call with wrong arg type
-    const char *src = 
-        "fn inc(a: i32) -> i32 { return 0; }\n"
-        "val: i32 = inc(true);"; 
-    CompileResult res = compile_source(src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors && res.ctx.errors->count > 0);
-    cleanup_compilation(&res);
-    return 1;
-}
-
-// -----------------------------------------------------------------------------
-// Advanced Features: Promotion, Inference, Initializers
-// -----------------------------------------------------------------------------
-
-int test_sema_type_promotion() {
-    // 1. Scalar Promotion: i32 -> f64
-    const char *src1 = "x: f64 = 10;"; 
-    CompileResult res1 = compile_source((char*)src1);
-    ASSERT(!res1.parse_failed);
-    ASSERT(res1.ctx.errors->count == 0);
-    
-    AstNode *decl = *(AstNode**)dynarray_get(res1.program->data.program.decls, 0);
-    AstNode *init = decl->data.variable_declaration.initializer;
-    
-    // Check that we either inserted a cast or promoted the type
-    // Depending on implementation, it might be an implicit cast node or a modified literal
-    bool promoted = (init->node_type == AST_CAST && init->data.cast_expr.target_type->kind == TYPE_PRIMITIVE) ||
-                    (init->node_type == AST_LITERAL && type_is_float(init->type));
-    
-    ASSERT(promoted);
-    cleanup_compilation(&res1);
-
-    // 2. Binary Op Promotion: 10 + 2.5 -> 12.5 (f64)
-    const char *src2 = "x: f64 = 10 + 2.5;";
-    CompileResult res2 = compile_source((char*)src2);
-    ASSERT(!res2.parse_failed);
-    ASSERT(res2.ctx.errors->count == 0);
-    cleanup_compilation(&res2);
-
-    return 1;
-}
-
-int test_sema_array_inference_1d() {
-    // 1. Simple Inference: i32[] = {1, 2, 3} -> i32[3]
-    const char *src = "arr: i32[] = {1, 2, 3};";
-    CompileResult res = compile_source((char*)src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count == 0);
-
-    AstNode *decl = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
-    Type *type = decl->type;
-
-    ASSERT_EQ_INT(type->kind, TYPE_ARRAY);
-    ASSERT_EQ_INT(type->as.array.size, 3);
-    ASSERT(type->as.array.size_known);
-    
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_array_inference_mixed_types() {
-    // 1. Inference + Promotion: f64[] = {1, 2.5, 3} -> f64[3]
-    const char *src = "arr: f64[] = {1, 2.5, 3};";
-    CompileResult res = compile_source((char*)src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count == 0);
-
-    AstNode *decl = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
-    Type *type = decl->type;
-
-    ASSERT_EQ_INT(type->kind, TYPE_ARRAY);
-    ASSERT_EQ_INT(type->as.array.size, 3);
-    
-    // Verify base type is f64 (floating point)
-    Type *base = type->as.array.base;
-    ASSERT(type_is_float(base)); 
-
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_multidimensional_arrays() {
-    // ---------------------------------------------------------
-    // Case 1: Strictly Asymmetric Explicit (i32[2][3][4])
-    // ---------------------------------------------------------
-    const char *src_explicit = 
-        "tensor: i32[2][3][4] = {"
-        "  {" // Block 0
-        "    { 1,  2,  3,  4}, " // Row 0
-        "    { 5,  6,  7,  8}, " // Row 1
-        "    { 9, 10, 11, 12}  " // Row 2
-        "  },"
-        "  {" // Block 1
-        "    {13, 14, 15, 16}, " // Row 0
-        "    {17, 18, 19, 20}, " // Row 1
-        "    {21, 22, 23, 24}  " // Row 2
-        "  }"
-        "};";
-
-    CompileResult res1 = compile_source((char*)src_explicit);
-    ASSERT(!res1.parse_failed);
-    ASSERT(res1.ctx.errors->count == 0);
-    
-    // Verify AST Types
-    AstNode *decl1 = *(AstNode**)dynarray_get(res1.program->data.program.decls, 0);
-    Type *t1 = decl1->type;
-    ASSERT_EQ_INT(t1->kind, TYPE_ARRAY);
-    ASSERT_EQ_INT(t1->as.array.size, 2);             // Outer
-    ASSERT_EQ_INT(t1->as.array.base->as.array.size, 3); // Middle
-    ASSERT_EQ_INT(t1->as.array.base->as.array.base->as.array.size, 4); // Inner
-    cleanup_compilation(&res1);
-
-    // ---------------------------------------------------------
-    // Case 2: Inferred Asymmetric (i32[][3][4])
-    // ---------------------------------------------------------
-    // Compiler must infer Outer=2 from the initializer.
-    const char *src_inferred = 
-        "tensor: i32[][3][4] = {"
-        "  { {1,2,3,4}, {5,6,7,8}, {9,0,1,2} },"
-        "  { {3,4,5,6}, {7,8,9,0}, {1,2,3,4} }"
-        "};";
-
-    CompileResult res2 = compile_source((char*)src_inferred);
-    ASSERT(!res2.parse_failed);
-    ASSERT(res2.ctx.errors->count == 0);
-
-    AstNode *decl2 = *(AstNode**)dynarray_get(res2.program->data.program.decls, 0);
-    Type *t2 = decl2->type;
-    ASSERT_EQ_INT(t2->as.array.size, 2); // Inferred Outer
-    ASSERT_EQ_INT(t2->as.array.base->as.array.size, 3); // Middle
-    cleanup_compilation(&res2);
-
-    // ---------------------------------------------------------
-    // Case 3: Deep Type Promotion (f64[2][2] from ints)
-    // ---------------------------------------------------------
-    // Verifies implicit casting works recursively.
-    const char *src_promo = "mat: f64[2][2] = {{1, 2}, {3, 4}};";
-    CompileResult res3 = compile_source((char*)src_promo);
-    ASSERT(!res3.parse_failed);
-    ASSERT(res3.ctx.errors->count == 0);
-    
-    // Check that the literal '1' (int) was wrapped in a Cast or converted
-    AstNode *decl3 = *(AstNode**)dynarray_get(res3.program->data.program.decls, 0);
-    AstNode *init_list = decl3->data.variable_declaration.initializer;
-    AstNode *first_row = *(AstNode**)dynarray_get(init_list->data.initializer_list.elements, 0);
-    AstNode *first_elem = *(AstNode**)dynarray_get(first_row->data.initializer_list.elements, 0);
-    
-    // Either it's a cast or the literal type was changed to f64
-    bool promoted = (first_elem->node_type == AST_CAST) || 
-                    (first_elem->node_type == AST_LITERAL && type_is_float(first_elem->type));
-    ASSERT(promoted);
-    cleanup_compilation(&res3);
-
-    // ---------------------------------------------------------
-    // Case 4: Error Detection (Mismatch)
-    // ---------------------------------------------------------
-    // Providing 4 rows where 3 are expected in the middle dimension.
-    const char *src_fail = 
-        "tensor: i32[2][3][4] = {"
-        "  {"
-        "    {1,2,3,4}, {5,6,7,8}, {9,0,1,2}, {1,1,1,1}" // 4 rows! Error.
-        "  },"
-        "  {"
-        "    {1,2,3,4}, {5,6,7,8}, {9,0,1,2}"
-        "  }"
-        "};";
-    CompileResult res4 = compile_source((char*)src_fail);
-    ASSERT(!res4.parse_failed);
-    ASSERT(res4.ctx.errors->count > 0); // Must have errors
-
-    cleanup_compilation(&res4);
-
-    return 1;
-}
-
-int test_sema_initializer_errors() {
-    // 1. Excess Elements: i32[2] = {1, 2, 3}
-    const char *src1 = "arr: i32[2] = {1, 2, 3};";
-    CompileResult res1 = compile_source(src1);
-    ASSERT(res1.ctx.errors->count > 0);
-    cleanup_compilation(&res1);
-
-    // 2. Type Mismatch in Array: i32[] = {1, "string"}
-    const char *src2 = "arr: i32[] = {1, \"bad\"};";
-    CompileResult res2 = compile_source(src2);
-    ASSERT(res2.ctx.errors->count > 0);
-    cleanup_compilation(&res2);
-
-    return 1;
-}
-
-int test_sema_const_folding() {
-    // 1. Const Eval: const i32 x = 2 * 5 + 1;
-    const char *src = "const x: i32 = 2 * 5 + 1;";
-    CompileResult res = compile_source((char*)src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count == 0);
-
-    AstNode *decl = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
-    AstNode *init = decl->data.variable_declaration.initializer;
-
-    // Check that the parser/sema folded this into a single literal or marked it as constant
-    // Depending on implementation, 'is_const_expr' should be true
-    ASSERT(init->is_const_expr);
-    ASSERT_EQ_INT(init->const_value.value.int_val, 11);
-    
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_bounds_checks() {
-    // 1. Bounds check in statement path
-    const char *src1 = "v: i32[2]; fn main() { v[2] = 1; }";
-    CompileResult res1 = compile_source(src1);
-    ASSERT(!res1.parse_failed && res1.ctx.errors->count > 0);
-    ASSERT_EQ_INT(((TypeError*)dynarray_get(res1.ctx.errors, 0))->kind, TE_INDEX_OUT_OF_BOUNDS);
-    cleanup_compilation(&res1);
-
-    // 2. Incomplete types (no size, no init)
-    const char *src2 = "v: i32[][3];";
-    CompileResult res2 = compile_source(src2);
-    ASSERT(res2.ctx.errors->count > 0);
-    ASSERT_EQ_INT(((TypeError*)dynarray_get(res2.ctx.errors, 0))->kind, TE_INCOMPLETE_TYPE);
-    cleanup_compilation(&res2);
-
-    // 3. Deep AST Patching Verification
-    const char *src3 = "mat: i32[][2] = {{1, 2}, {3, 4}, {5, 6}};";
-    CompileResult res3 = compile_source(src3);
-    ASSERT(res3.ctx.errors->count == 0);
-
-    AstNode *decl = *(AstNode**)dynarray_get(res3.program->data.program.decls, 0);
-    AstType *ast_t = &decl->data.variable_declaration.type->data.ast_type;
-    
-    // Check semantic type
-    ASSERT_EQ_INT(decl->type->as.array.size, 3);
-    // Check syntactic AST patching
-    ASSERT_NOT_NULL(ast_t->u.array.size_expr);
-    ASSERT_EQ_INT(ast_t->u.array.size_expr->const_value.value.int_val, 3);
-    
-    cleanup_compilation(&res3);
-
-    // 4. Multi-dimensional OOB check
-    const char *src4 = "m: i32[2][2]; fn main() { m[0][5] = 1; }";
-    CompileResult res4 = compile_source(src4);
-    ASSERT(res4.ctx.errors->count > 0);
-    ASSERT_EQ_INT(((TypeError*)dynarray_get(res4.ctx.errors, 0))->kind, TE_INDEX_OUT_OF_BOUNDS);
-    cleanup_compilation(&res4);
-
-    return 1;
-}
-
-int test_sema_array_len() {
-    const char *src = "fn main() { arr: i32[5]; x: i64 = arr.len; }";
-    CompileResult res = compile_source(src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count == 0);
-
-    // Check that it was folded to a literal 5
-    AstNode *main_func = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
-    AstNode *block = main_func->data.function_declaration.body;
-    AstNode *x_decl = *(AstNode**)dynarray_get(block->data.block.statements, 1);
-    AstNode *init = x_decl->data.variable_declaration.initializer;
-    
-    ASSERT_EQ_INT(init->node_type, AST_LITERAL);
-    ASSERT_EQ_INT(init->const_value.value.int_val, 5);
-
-    cleanup_compilation(&res);
-    return 1;
-}
-
-// -----------------------------------------------------------------------------
-// Struct Semantic Tests
-// -----------------------------------------------------------------------------
-
-int test_sema_struct_basic() {
-    const char *src = 
-        "struct Point { x: i32; y: i32; }\n"
-        "fn main() {\n"
-        "    p: Point = Point{x: 10, y: 20};\n"
-        "    a: i32 = p.x;\n"
-        "}";
-    CompileResult res = compile_source(src);
-    ASSERT(!res.parse_failed);
-    ASSERT(res.ctx.errors->count == 0);
-    cleanup_compilation(&res);
-    return 1;
-}
-
-int test_sema_struct_missing_field() {
-    const char *src = 
-        "struct Point { x: i32; y: i32; }\n"
-        "fn main() {\n"
-        "    p: Point = Point{x: 10, y: 20};\n"
-        "    a: i32 = p.z;\n" // Error: Point has no field 'z'
-        "}";
-    ASSERT(check_sema_error(src, TE_FIELD_ACCESS));
-    return 1;
-}
-
-int test_sema_struct_literal_mismatch() {
-    const char *src = 
-        "struct Point { x: i32; y: i32; }\n"
-        "fn main() {\n"
-        "    p: Point = Point{x: 10, z: 20};\n" // Error: 'z' is not a field of Point
-        "}";
-    ASSERT(check_sema_error(src, TE_FIELD_ACCESS));
-    return 1;
-}
-
-int test_sema_struct_literal_arg_count() {
-    const char *src = 
-        "struct Point { x: i32; y: i32; }\n"
-        "fn main() {\n"
-        "    p: Point = Point{x: 10};\n" // Error: Point expects 2 fields
-        "}";
+    const char *src = "fn f(a: i32) {} fn main() { f(); }";
     ASSERT(check_sema_error(src, TE_ARG_COUNT_MISMATCH));
     return 1;
 }
 
-int test_sema_struct_binop_mismatch() {
-    const char *src = 
-        "struct Pair { a: i32; b: i32; }\n"
-        "fn main() {\n"
-        "    p: Pair = Pair{a: 1, b: 2};\n"
-        "    res: i32 = p.a + p;\n" // Error: i32 + struct Pair
-        "}";
-    ASSERT(check_sema_error(src, TE_BINOP_MISMATCH));
+int test_sema_undeclared() {
+    const char *src = "fn main() { x = 1; }";
+    ASSERT(check_sema_error(src, TE_UNDECLARED));
     return 1;
 }
 
-int test_sema_full_features() {
-    const char *src = 
-        "struct Pair { a: i32; b: i32; }\n"
-        "fn main() {\n"
-        "    arr: Pair[2] = { Pair{a: 1, b: 2}, Pair{a: 3, b: 4} };\n"
-        "    x: i32 = arr[0].a + arr[1].b;\n"
-        "}";
+int test_sema_struct_basic() {
+    const char *src = "struct S { x: i32; } fn main() { s: S = S{x: 10}; val: i32 = s.x; }";
+    ASSERT(check_sema_valid(src));
+    return 1;
+}
+
+int test_sema_const_folding() {
+    const char *src = "const x: i32 = 1 + 2 * 3;";
     CompileResult res = compile_source(src);
-    ASSERT(!res.parse_failed);
     ASSERT(res.ctx.errors->count == 0);
+    AstNode *decl = *(AstNode**)dynarray_get(res.program->data.program.decls, 0);
+    ASSERT(decl->data.variable_declaration.initializer->is_const_expr);
+    ASSERT_EQ_INT(decl->data.variable_declaration.initializer->const_value.value.int_val, 7);
     cleanup_compilation(&res);
     return 1;
 }

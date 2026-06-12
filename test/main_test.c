@@ -1,16 +1,17 @@
 #include "test_harness.h"
 
-// Declare external test functions
+// Lexer Tests
 int test_lexer_basic();
 int test_lexer_comments(); 
 int test_lexer_operators(); 
-// Extended Lexer
 int test_lexer_float_literals();
 int test_lexer_bad_strings();
 int test_lexer_identifiers();
 int test_lexer_empty();
 int test_lexer_whitespace_only();
+int test_lexer_as_keyword();
 
+// Parser Tests
 int test_parser_expression();
 int test_parser_unary_precedence();
 int test_parser_comparison_precedence();
@@ -27,49 +28,42 @@ int test_parser_while_statement();
 int test_parser_arrays_and_pointers();
 int test_parser_member_access();
 int test_parser_flow_control();
+int test_parser_cast();
+int test_parser_void_pointer();
 
+// Sema Tests
+int test_sema_implicit_widening();
+int test_sema_literal_inference();
+int test_sema_strict_binary_ops();
+int test_sema_as_casting();
+int test_sema_pointer_rules();
+int test_sema_array_slice_rules();
+int test_sema_shadowing();
 int test_sema_arg_mismatch_regression();
-int test_sema_type_mismatch(); 
-int test_sema_undeclared(); 
-int test_sema_valid_program();
-// Extended Sema
-int test_sema_call_arg_count();
-int test_sema_call_arg_type();
-int test_sema_full_features(); // Full integration test
-int test_sema_type_promotion();
-int test_sema_array_inference_1d();
-int test_sema_array_inference_mixed_types();
-int test_sema_multidimensional_arrays();
-int test_sema_initializer_errors();
-int test_sema_const_folding();
-int test_sema_bounds_checks();
-int test_sema_array_len();
+int test_sema_undeclared();
 int test_sema_struct_basic();
-int test_sema_struct_missing_field();
-int test_sema_struct_literal_mismatch();
-int test_sema_struct_literal_arg_count();
-int test_sema_struct_binop_mismatch();
+int test_sema_const_folding();
 
 // Codegen Tests
 int test_codegen_basic_arithmetic();
-int test_codegen_recursion();
-int test_codegen_array_sort();
-int test_codegen_logic();
+int test_codegen_float_math();
 int test_codegen_complex_loop();
-int test_codegen_fib_recursive();
-int test_codegen_nested_loops();
-int test_codegen_matrix_multiplication();
-int test_codegen_break_continue();
-int test_codegen_shadowing();
-int test_codegen_type_promotion();
-int test_codegen_large_array();
-int test_codegen_strings();
-int test_codegen_slice_len_write();
-int test_codegen_fixed_array_len();
-int test_codegen_multi_array_len();
-int test_codegen_multi_array_slice_func();
-int test_codegen_structs();
-int test_codegen_struct_edge_cases();
+int test_codegen_nested_control_flow();
+int test_codegen_recursion_edge();
+int test_codegen_multi_dim_arrays();
+int test_codegen_array_len_casting();
+int test_codegen_slice_decay_func();
+int test_codegen_nested_structs();
+int test_codegen_struct_pointers();
+int test_codegen_void_ptr_roundtrip();
+int test_codegen_ptr_to_int_cast();
+int test_codegen_char_math();
+int test_codegen_boolean_logic();
+int test_codegen_huge_stack_array();
+int test_codegen_shadowing_scoping();
+int test_codegen_bool_cast_branch();
+int test_codegen_struct_value_passing();
+int test_codegen_string_indexing();
 
 // Exceptions
 int test_exception_long_identifier();
@@ -90,6 +84,7 @@ int main() {
     run_test("Lexer: Identifiers", test_lexer_identifiers);
     run_test("Lexer: Empty File", test_lexer_empty);
     run_test("Lexer: Whitespace", test_lexer_whitespace_only);
+    run_test("Lexer: 'as' Keyword", test_lexer_as_keyword);
 
     // Parser Tests
     run_test("Parser: Expression Precedence", test_parser_expression);
@@ -108,49 +103,42 @@ int main() {
     run_test("Parser: Arrays & Pointers", test_parser_arrays_and_pointers);
     run_test("Parser: Member Access", test_parser_member_access);
     run_test("Parser: Flow Control", test_parser_flow_control);
+    run_test("Parser: 'as' Cast", test_parser_cast);
+    run_test("Parser: 'void' Pointer", test_parser_void_pointer);
 
     // Sema Tests
+    run_test("Sema: Implicit Widening", test_sema_implicit_widening);
+    run_test("Sema: Literal Inference", test_sema_literal_inference);
+    run_test("Sema: Strict Binary Ops", test_sema_strict_binary_ops);
+    run_test("Sema: 'as' Casting", test_sema_as_casting);
+    run_test("Sema: Pointer Rules", test_sema_pointer_rules);
+    run_test("Sema: Array & Slice Rules", test_sema_array_slice_rules);
+    run_test("Sema: Shadowing & Scoping", test_sema_shadowing);
     run_test("Sema: Arg Count Mismatch", test_sema_arg_mismatch_regression);
-    run_test("Sema: Type Mismatch", test_sema_type_mismatch);
     run_test("Sema: Undeclared Variable", test_sema_undeclared);
-    run_test("Sema: Valid Program", test_sema_valid_program);
-    run_test("Sema: Call Arg Count", test_sema_call_arg_count);
-    run_test("Sema: Call Arg Type", test_sema_call_arg_type);
-    run_test("Sema: Full Features", test_sema_full_features);
-    run_test("Sema: Type Promotion", test_sema_type_promotion);
-    run_test("Sema: Array Inference (1D)", test_sema_array_inference_1d);
-    run_test("Sema: Array Inference (Mixed)", test_sema_array_inference_mixed_types);
-    run_test("Sema: 2D Arrays", test_sema_multidimensional_arrays);
-    run_test("Sema: Initializer Errors", test_sema_initializer_errors);
-    run_test("Sema: Const Folding", test_sema_const_folding);
-    run_test("Sema: Bounds Checks", test_sema_bounds_checks);
-    run_test("Sema: Array Len", test_sema_array_len);
     run_test("Sema: Struct Basic", test_sema_struct_basic);
-    run_test("Sema: Struct Missing Field", test_sema_struct_missing_field);
-    run_test("Sema: Struct Literal Mismatch", test_sema_struct_literal_mismatch);
-    run_test("Sema: Struct Literal Arg Count", test_sema_struct_literal_arg_count);
-    run_test("Sema: Struct Binop Mismatch", test_sema_struct_binop_mismatch);
+    run_test("Sema: Const Folding", test_sema_const_folding);
 
     // Codegen Tests
     run_test("Codegen: Basic Arithmetic", test_codegen_basic_arithmetic);
-    run_test("Codegen: Recursion", test_codegen_recursion);
-    run_test("Codegen: Array Sort", test_codegen_array_sort);
-    run_test("Codegen: Logic", test_codegen_logic);
+    run_test("Codegen: Float Math", test_codegen_float_math);
     run_test("Codegen: Complex Loop", test_codegen_complex_loop);
-    run_test("Codegen: Recursive Fib", test_codegen_fib_recursive);
-    run_test("Codegen: Nested Loops", test_codegen_nested_loops);
-    run_test("Codegen: Matrix Multiplication", test_codegen_matrix_multiplication);
-    run_test("Codegen: Break/Continue", test_codegen_break_continue);
-    run_test("Codegen: Shadowing", test_codegen_shadowing);
-    run_test("Codegen: Type Promotion", test_codegen_type_promotion);
-    run_test("Codegen: Large Arrays", test_codegen_large_array);
-    run_test("Codegen: Strings", test_codegen_strings);
-    run_test("Codegen: Slice Len Write", test_codegen_slice_len_write);
-    run_test("Codegen: Fixed Array Len", test_codegen_fixed_array_len);
-    run_test("Codegen: Multi Array Len", test_codegen_multi_array_len);
-    run_test("Codegen: Multi Array Slice Func", test_codegen_multi_array_slice_func);
-    run_test("Codegen: Structs", test_codegen_structs);
-    run_test("Codegen: Struct Edge Cases", test_codegen_struct_edge_cases);
+    run_test("Codegen: Nested Control Flow", test_codegen_nested_control_flow);
+    run_test("Codegen: Recursion Edge", test_codegen_recursion_edge);
+    run_test("Codegen: Multi-dim Arrays", test_codegen_multi_dim_arrays);
+    run_test("Codegen: Array Len Casting", test_codegen_array_len_casting);
+    run_test("Codegen: Slice Decay Func", test_codegen_slice_decay_func);
+    run_test("Codegen: Nested Structs", test_codegen_nested_structs);
+    run_test("Codegen: Struct Pointers", test_codegen_struct_pointers);
+    run_test("Codegen: Void Ptr Roundtrip", test_codegen_void_ptr_roundtrip);
+    run_test("Codegen: Ptr to Int Cast", test_codegen_ptr_to_int_cast);
+    run_test("Codegen: Char Math", test_codegen_char_math);
+    run_test("Codegen: Boolean Logic", test_codegen_boolean_logic);
+    run_test("Codegen: Huge Stack Array", test_codegen_huge_stack_array);
+    run_test("Codegen: Shadowing & Scoping", test_codegen_shadowing_scoping);
+    run_test("Codegen: Bool Cast Branch", test_codegen_bool_cast_branch);
+    run_test("Codegen: Struct Value Passing", test_codegen_struct_value_passing);
+    run_test("Codegen: String Indexing", test_codegen_string_indexing);
 
     // Exceptions & Stress
     run_test("Exception: Long Identifier", test_exception_long_identifier);

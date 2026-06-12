@@ -1,7 +1,9 @@
-struct Pair { a: i32; b: i32; }
+fn fib(n: i32) -> i32 {
+    if (n <= 1) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
 
-fn main() -> i32 {
-    arr: Pair[2] = { Pair{a: 1, b: 2}, Pair{a: 3, b: 4} };
-    arr[1].a = 10;
-    return arr[0].b + arr[1].a;
+fn main() {
+    res: i32 = fib(40);
+    println(res);
 }

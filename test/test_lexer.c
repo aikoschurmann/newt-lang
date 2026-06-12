@@ -33,15 +33,8 @@ int test_lexer_comments() {
     Lexer *l = lexer_create(src, strlen(src), arena);
     ASSERT(lexer_lex_all(l));
     
-    // Expect: 10, 20, EOF (Comments are skipped or handled?) 
-    // Wait, TOK_COMMENT is in token.h, depends on lexer implementation if it keeps it.
-    // Usually lexers skip comments unless specified. Let's check typical behavior.
-    // If it preserves comments, we expect TOK_INT_LIT, TOK_COMMENT, TOK_INT_LIT
-    // Let's assume for now it might skip, checking the code...
-    // Actually, let's look at what we have. token.h has TOK_COMMENT.
-    
-    // Simple check: count tokens.
-    // If we can't look at code right now cleanly, let's write safe test.
+    // Expect: 10, 20, EOF (Comments are skipped)
+    ASSERT_EQ_INT(l->tokens->count, 3);
     
     lexer_destroy(l);
     arena_destroy(arena);
@@ -185,6 +178,28 @@ int test_exception_weird_chars() {
          }
          // Not strictly asserting, but good to know
     }
+    lexer_destroy(l);
+    arena_destroy(arena);
+    return 1;
+}
+
+int test_lexer_as_keyword() {
+    Arena *arena = arena_create(1024);
+    const char *src = "x as i32";
+    Lexer *l = lexer_create(src, strlen(src), arena);
+    ASSERT(lexer_lex_all(l));
+    
+    int expected_types[] = {
+        TOK_IDENTIFIER, TOK_AS, TOK_I32, TOK_EOF
+    };
+    
+    ASSERT_EQ_INT(l->tokens->count, 4);
+    
+    for(int i=0; i<4; i++) {
+        Token *t = (Token*)dynarray_get(l->tokens, i);
+        ASSERT_EQ_INT(t->type, expected_types[i]);
+    }
+
     lexer_destroy(l);
     arena_destroy(arena);
     return 1;

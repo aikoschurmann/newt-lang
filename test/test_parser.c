@@ -372,6 +372,52 @@ int test_parser_member_access() {
     return 1;
 }
 
+int test_parser_cast() {
+    // x as i32
+    Arena *arena = arena_create(1024*1024);
+    const char *src = "x as i32";
+    Lexer *lexer = lexer_create(src, strlen(src), arena);
+    lexer_lex_all(lexer);
+    Parser *p = parser_create(lexer->tokens, "test", arena);
+    
+    ParseError err = {0};
+    AstNode *expr = parse_expression(p, &err);
+    ASSERT_NOT_NULL(expr);
+    ASSERT_EQ_INT(expr->node_type, AST_CAST);
+    ASSERT_NOT_NULL(expr->data.cast_expr.expr);
+    ASSERT_NOT_NULL(expr->data.cast_expr.target_type_node);
+    ASSERT_EQ_INT(expr->data.cast_expr.target_type_node->node_type, AST_TYPE);
+
+    lexer_destroy(lexer);
+    arena_destroy(arena);
+    return 1;
+}
+
+int test_parser_void_pointer() {
+    Arena *arena = arena_create(1024*1024);
+    const char *src = "fn main() { x: *void; }";
+    Lexer *lexer = lexer_create(src, strlen(src), arena);
+    lexer_lex_all(lexer);
+    Parser *p = parser_create(lexer->tokens, "test", arena);
+
+    ParseError err = {0};
+    AstNode *prog = parse_program(p, &err);
+    ASSERT_NOT_NULL(prog);
+
+    AstNode *func = *(AstNode**)dynarray_get(prog->data.program.decls, 0);
+    AstBlock *body = &func->data.function_declaration.body->data.block;
+    AstNode *stmt = *(AstNode**)dynarray_get(body->statements, 0);
+
+    ASSERT_EQ_INT(stmt->node_type, AST_VARIABLE_DECLARATION);
+    AstNode *type = stmt->data.variable_declaration.type;
+    ASSERT_EQ_INT(type->data.ast_type.kind, AST_TYPE_PTR);
+    ASSERT_EQ_INT(type->data.ast_type.u.ptr.target->data.ast_type.kind, AST_TYPE_PRIMITIVE);
+
+    lexer_destroy(lexer);
+    arena_destroy(arena);
+    return 1;
+}
+
 int test_parser_flow_control() {
     // 1. Return with value
     const char *src_ret = "fn main() { return 0; }";
