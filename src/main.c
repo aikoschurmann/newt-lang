@@ -16,7 +16,7 @@
 #include "scope.h"
 #include "cli.h"
 #include "metrics.h"
-#include "utils.h"       // <--- Add this
+#include "utils.h"
 #include "codegen.h"
 
 
@@ -30,6 +30,7 @@
 #define EXIT_TYPE  5
 
 int main(int argc, char **argv) {
+    codegen_initialize();
     // 1. Parse CLI Options
     Options opts;
     const char *path = NULL;

@@ -9,13 +9,6 @@
 
 // Helper to compile and run a source string, returning the exit code of the generated program
 static int run_compiled_code(const char *src) {
-    static int test_id = 0;
-    char obj_name[64];
-    char bin_name[64];
-    sprintf(obj_name, "test_output_%d.o", test_id);
-    sprintf(bin_name, "./test_output_%d", test_id);
-    test_id++;
-
     CompileResult res = compile_source(src);
     if (res.parse_failed || (res.ctx.errors && res.ctx.errors->count > 0)) {
         cleanup_compilation(&res);
@@ -29,26 +22,7 @@ static int run_compiled_code(const char *src) {
         return -101; // Codegen failed
     }
 
-    codegen_emit_object(cg_ctx, obj_name);
-    
-    // Link with runtime
-    char link_cmd[128];
-    sprintf(link_cmd, "cc %s src/core/runtime.c -o %s", obj_name, bin_name);
-    int link_ret = system(link_cmd);
-    if (link_ret != 0) {
-        codegen_context_destroy(cg_ctx);
-        cleanup_compilation(&res);
-        return -102; // Linking failed
-    }
-
-    // Run the executable
-    int run_ret = system(bin_name);
-    int exit_code = WEXITSTATUS(run_ret);
-
-    // Cleanup artifacts
-    unlink(obj_name);
-    unlink(bin_name);
-    unlink("output.ll");
+    int exit_code = codegen_run_jit(cg_ctx);
 
     codegen_context_destroy(cg_ctx);
     cleanup_compilation(&res);

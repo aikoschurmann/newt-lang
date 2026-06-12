@@ -1,6 +1,18 @@
 #include "codegen_internal.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Transforms/PassBuilder.h>
+#include <llvm-c/ExecutionEngine.h>
+#include <llvm-c/Support.h>
+
+void codegen_initialize() {
+    LLVMInitializeAllTargetInfos();
+    LLVMInitializeAllTargets();
+    LLVMInitializeAllTargetMCs();
+    LLVMInitializeAllAsmParsers();
+    LLVMInitializeAllAsmPrinters();
+    LLVMLinkInMCJIT();
+    LLVMLoadLibraryPermanently(NULL);
+}
 
 static void run_optimizations(CodegenContext *ctx, LLVMTargetMachineRef machine) {
     if (ctx->opt_level <= 0) return;
@@ -9,14 +21,7 @@ static void run_optimizations(CodegenContext *ctx, LLVMTargetMachineRef machine)
     snprintf(passes, sizeof(passes), "default<O%d>", ctx->opt_level);
 
     LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
-    LLVMErrorRef err = LLVMRunPasses(ctx->module, passes, machine, opts);
-    
-    if (err) {
-        char *msg = LLVMGetErrorMessage(err);
-        fprintf(stderr, "LLVM Pass Error: %s\n", msg);
-        LLVMDisposeErrorMessage(msg);
-    }
-
+    LLVMRunPasses(ctx->module, passes, machine, opts);
     LLVMDisposePassBuilderOptions(opts);
 }
 
@@ -34,13 +39,6 @@ int codegen_program(CodegenContext *ctx) {
         AstNode *decl = *(AstNode**)dynarray_get(decls, i);
         codegen_decl_body(ctx, decl);
     }
-
-    // Initialize target for optimizations
-    LLVMInitializeAllTargetInfos();
-    LLVMInitializeAllTargets();
-    LLVMInitializeAllTargetMCs();
-    LLVMInitializeAllAsmParsers();
-    LLVMInitializeAllAsmPrinters();
 
     char *target_triple = LLVMGetDefaultTargetTriple();
     LLVMSetTarget(ctx->module, target_triple);
@@ -100,4 +98,38 @@ void codegen_emit_object(CodegenContext *ctx, const char *filename) {
 
     LLVMDisposeTargetMachine(machine);
     LLVMDisposeMessage(target_triple);
+}
+
+int codegen_run_jit(CodegenContext *ctx) {
+    LLVMExecutionEngineRef engine;
+    char *error = NULL;
+
+    if (LLVMCreateExecutionEngineForModule(&engine, ctx->module, &error) != 0) {
+        fprintf(stderr, "Failed to create execution engine: %s\n", error);
+        LLVMDisposeMessage(error);
+        return -1;
+    }
+
+    LLVMValueRef main_func = LLVMGetNamedFunction(ctx->module, "main");
+    if (!main_func) {
+        fprintf(stderr, "Could not find main function\n");
+        LLVMRemoveModule(engine, ctx->module, &ctx->module, &error);
+        LLVMDisposeExecutionEngine(engine);
+        return -1;
+    }
+
+    uint64_t addr = LLVMGetFunctionAddress(engine, "main");
+    int (*main_ptr)() = (int (*)())addr;
+    int result = main_ptr();
+
+    // Remove the module from the engine so that LLVMDisposeExecutionEngine 
+    // doesn't dispose it. CodegenContext still owns the module.
+    LLVMModuleRef removed_module;
+    if (LLVMRemoveModule(engine, ctx->module, &removed_module, &error) != 0) {
+        fprintf(stderr, "Failed to remove module from JIT: %s\n", error);
+        LLVMDisposeMessage(error);
+    }
+
+    LLVMDisposeExecutionEngine(engine);
+    return result;
 }

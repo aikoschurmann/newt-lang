@@ -1,4 +1,5 @@
 #include "test_harness.h"
+#include "codegen/codegen.h"
 
 // Lexer Tests
 int test_lexer_basic();
@@ -73,6 +74,7 @@ int test_exception_weird_chars();
 
 
 int main() {
+    codegen_initialize();
     fprintf(stderr, "=== Running Compiler Test Suite ===\n");
     
     // Lexer Tests

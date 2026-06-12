@@ -8,7 +8,7 @@ CC := gcc
 
 LLVM_CONFIG := /opt/homebrew/opt/llvm/bin/llvm-config
 LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
-LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags --libs core analysis bitwriter target native)
+LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags --libs core analysis bitwriter target native executionengine mcjit orcjit)
 
 # Base flags
 CFLAGS_BASE := -Iinclude -Iinclude/cli -Iinclude/core -Iinclude/codegen -Iinclude/datastructures -Iinclude/lexing -Iinclude/parsing -Iinclude/sema -Iinclude/types -Iinclude/test $(LLVM_CFLAGS) -MMD -MP -g
