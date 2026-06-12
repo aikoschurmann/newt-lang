@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
     // ---------------------------------------------------------
     // PHASE 1: Lexical Analysis
     // ---------------------------------------------------------
+    if (opts.verbose) printf("[1/4] Lexing...\n");
     lexer = lexer_create(src, src_len, arena);
     if (!lexer) {
         fprintf(stderr, "Error: Failed to initialize lexer\n");
@@ -103,6 +104,7 @@ int main(int argc, char **argv) {
     // ---------------------------------------------------------
     // PHASE 2: Parsing
     // ---------------------------------------------------------
+    if (opts.verbose) printf("[2/4] Parsing...\n");
     parser = parser_create(lexer->tokens, filename_interned, arena);
     if (!parser) {
         fprintf(stderr, "Error: Failed to initialize parser\n");
@@ -131,6 +133,7 @@ int main(int argc, char **argv) {
     // ---------------------------------------------------------
     // PHASE 3: Semantic Analysis (Type Checking)
     // ---------------------------------------------------------
+    if (opts.verbose) printf("[3/4] Semantic Analysis...\n");
     size_t mem_before_sema = arena_total_allocated(arena);
     double t3 = now_seconds();
 
@@ -162,16 +165,16 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    // ---------------------------------------------------------
     // PHASE 4: Code Generation
     // ---------------------------------------------------------
+    if (opts.verbose) printf("[4/4] Code Generation...\n");
     double t5 = now_seconds();
     double t_run = 0;
     int program_exit_code = 0;
     CodegenContext *cg_ctx = codegen_context_create(program, store, "main_module", opts.opt_level);
     if (codegen_program(cg_ctx) == 0) {
         // Successfully generated IR
-        if (opts.run_executable || opts.print_ast || opts.print_types) {
+        if (opts.print_ir) {
              codegen_dump_module(cg_ctx);
         }
 
@@ -179,17 +182,17 @@ int main(int argc, char **argv) {
         snprintf(obj_path, sizeof(obj_path), "%s.o", opts.output_name);
         codegen_emit_object(cg_ctx, obj_path);
         
-        if (!opts.quiet) printf("Linking...\n");
+        if (opts.verbose) printf("Linking...\n");
         char link_cmd[512];
         snprintf(link_cmd, sizeof(link_cmd), "cc %s src/core/runtime.c -o %s 2>/dev/null || cc %s -o %s", 
                  obj_path, opts.output_name, obj_path, opts.output_name);
         
         int ret = system(link_cmd);
         if (ret == 0) {
-            if (!opts.quiet) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
+            if (opts.verbose) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
             
             if (opts.run_executable) {
-                if (!opts.quiet) printf("\n--- Running Output ---\n");
+                if (opts.verbose) printf("\n--- Running Output ---\n");
                 double t_run_start = now_seconds();
                 char run_cmd[258];
                 snprintf(run_cmd, sizeof(run_cmd), "./%s", opts.output_name);
@@ -199,9 +202,9 @@ int main(int argc, char **argv) {
                 // system() returns termination status (exit code is high 8 bits)
                 if (WIFEXITED(program_exit_code)) {
                     program_exit_code = WEXITSTATUS(program_exit_code);
-                    if (!opts.quiet) printf("--- Process Exited with Code: %d ---\n", program_exit_code);
+                    if (opts.verbose) printf("--- Process Exited with Code: %d ---\n", program_exit_code);
                 } else if (WIFSIGNALED(program_exit_code)) {
-                    if (!opts.quiet) printf("--- Process Terminated by Signal: %d ---\n", WTERMSIG(program_exit_code));
+                    if (opts.verbose) printf("--- Process Terminated by Signal: %d ---\n", WTERMSIG(program_exit_code));
                 }
             }
         } else {
@@ -242,6 +245,7 @@ int main(int argc, char **argv) {
             .time_tokenize_ms = t_lex * 1000,
             .time_parse_ms = t_parse * 1000,
             .time_sema_ms = t_sema * 1000,
+            .time_codegen_ms = t_codegen * 1000,
             .mem_lex_bytes = mem_lex,
             .mem_parse_bytes = mem_parse,
             .mem_sema_bytes = mem_sema,
@@ -251,12 +255,6 @@ int main(int argc, char **argv) {
             .filename = filename_interned
         };
         print_compilation_report(&stats, program);
-        
-        printf("\n--- Extended Metrics ---\n");
-        printf("Codegen Time:     %8.3f ms\n", t_codegen * 1000.0);
-        if (opts.run_executable) {
-            printf("Execution Time:   %8.3f ms\n", t_run * 1000.0);
-        }
     }
 
 cleanup:

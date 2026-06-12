@@ -5,8 +5,10 @@
 typedef struct {
     bool print_tokens;
     bool print_ast;
+    bool print_ir;
     bool print_time;
     bool print_types;
+    bool verbose;
     bool run_executable;
     bool quiet;
     int opt_level;

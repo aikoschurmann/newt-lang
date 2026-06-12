@@ -44,28 +44,40 @@ all: release dev
 release: $(OUT_DIR)/$(NAME)
 dev: $(OUT_DIR)/$(NAME_DEV)
 
+# Pretty printing
+ifeq ($(VERBOSE),1)
+  Q :=
+else
+  Q := @
+endif
+
 # Release Build
 $(OUT_DIR)/$(NAME): $(OBJ_DIR)/release/main.o $(COMMON_OBJ_FILES_RELEASE)
 	@mkdir -p $(OUT_DIR)
-	$(CC) $^ -o $@ $(LDFLAGS_RELEASE)
+	@echo "  LD      $@"
+	$(Q)$(CC) $^ -o $@ $(LDFLAGS_RELEASE)
 
 $(OBJ_DIR)/release/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_RELEASE) -c $< -o $@
+	@echo "  CC      $<"
+	$(Q)$(CC) $(CFLAGS_RELEASE) -c $< -o $@
 
 # Dev Build
 $(OUT_DIR)/$(NAME_DEV): $(OBJ_DIR)/dev/main.o $(COMMON_OBJ_FILES_DEV)
 	@mkdir -p $(OUT_DIR)
-	$(CC) $^ -o $@ $(LDFLAGS_DEV)
+	@echo "  LD      $@"
+	$(Q)$(CC) $^ -o $@ $(LDFLAGS_DEV)
 
 $(OBJ_DIR)/dev/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_DEV) -c $< -o $@
+	@echo "  CC      $<"
+	$(Q)$(CC) $(CFLAGS_DEV) -c $< -o $@
 
 # ASAN Build
 asan:
 	@mkdir -p $(OBJ_DIR)/asan $(OUT_DIR)
-	$(CC) $(CFLAGS_ASAN) $(SRC_FILES) -o $(OUT_DIR)/$(NAME)-asan $(LDFLAGS_ASAN)
+	@echo "  LD      $(OUT_DIR)/$(NAME)-asan"
+	$(Q)$(CC) $(CFLAGS_ASAN) $(SRC_FILES) -o $(OUT_DIR)/$(NAME)-asan $(LDFLAGS_ASAN)
 	@echo "Built ASAN binary: ./$(OUT_DIR)/$(NAME)-asan"
 
 # Test Runner
@@ -74,20 +86,23 @@ TEST_OBJ_FILES := $(patsubst test/%.c,$(OBJ_DIR)/test/%.o,$(TEST_SRC_FILES))
 
 $(OUT_DIR)/test_runner: $(COMMON_OBJ_FILES_DEV) $(TEST_OBJ_FILES)
 	@mkdir -p $(OUT_DIR)
-	$(CC) $^ -o $@ $(LDFLAGS_DEV)
+	@echo "  LD      $@"
+	$(Q)$(CC) $^ -o $@ $(LDFLAGS_DEV)
 
 $(OBJ_DIR)/test/%.o: test/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS_DEV) -c $< -o $@
+	@echo "  CC      $<"
+	$(Q)$(CC) $(CFLAGS_DEV) -c $< -o $@
 
 clean:
-	rm -rf $(OBJ_DIR) $(OUT_DIR)
+	@echo "  CLEAN"
+	$(Q)rm -rf $(OBJ_DIR) $(OUT_DIR)
 
 run: release
-	./$(OUT_DIR)/$(NAME) ./input/test.tn --run
+	$(Q)./$(OUT_DIR)/$(NAME) ./input/test.tn --run
 
 run-dev: dev
-	./$(OUT_DIR)/$(NAME_DEV) ./input/test.tn --run
+	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/test.tn --run
 
 test: $(OUT_DIR)/test_runner
-	./$(OUT_DIR)/test_runner
+	$(Q)./$(OUT_DIR)/test_runner

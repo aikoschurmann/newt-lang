@@ -133,24 +133,13 @@ size_t count_ast_nodes(AstNode *program) {
 // Report Printer
 // -----------------------------------------------------------------------------
 
-static void print_bar(double percent) {
-    int bars = (int)(percent * 16.0); // 16 chars width
-    if (bars > 16) bars = 16;
-    if (bars < 0) bars = 0;
-    
-    printf(" ");
-    for (int i = 0; i < bars; i++) printf("█");
-    for (int i = bars; i < 16; i++) printf("░");
-    printf(" ");
-}
-
 static void print_mem_unit(size_t bytes) {
     if (bytes < 1024) {
-        printf("%10zu B ", bytes);
+        printf("  %7zu B   ", bytes);
     } else if (bytes < 1024 * 1024) {
-        printf("%9.2f KB ", bytes / 1024.0);
+        printf("  %7.2f KB  ", bytes / 1024.0);
     } else {
-        printf("%9.2f MB ", bytes / (1024.0 * 1024.0));
+        printf("  %7.2f MB  ", bytes / (1024.0 * 1024.0));
     }
 }
 
@@ -161,77 +150,32 @@ void print_compilation_report(CompilationStats *stats, AstNode *program) {
     size_t ast_nodes = count_ast_nodes(program);
     size_t total_mem = stats->mem_lex_bytes + stats->mem_parse_bytes + stats->mem_sema_bytes;
     double throughput = (stats->file_size_bytes / (1024.0 * 1024.0)) / (total_time / 1000.0);
-    size_t tps = (size_t)(stats->token_count / (total_time / 1000.0));
 
-    printf("\n%s┌─────────────────────────────────────────────────────────────────────┐%s\n", COL_GRAY, COL_RESET);
-    printf("%s│%s                          COMPILATION REPORT                         %s│%s\n", COL_GRAY, COL_BOLD, COL_GRAY, COL_RESET);
-    printf("%s└─────────────────────────────────────────────────────────────────────┘%s\n", COL_GRAY, COL_RESET);
+    printf("\n%s[%sCompiling %s%s%s]%s\n", COL_GRAY, COL_RESET, COL_CYAN, stats->filename ? stats->filename : "<stdin>", COL_RESET, COL_RESET);
 
-    printf("\nFile: %s%s%s (%zu bytes)\n", COL_CYAN, stats->filename ? stats->filename : "<stdin>", COL_RESET, stats->file_size_bytes);
+    printf("%s┌─────────────────┬─────────────┬──────────────┐%s\n", COL_GRAY, COL_RESET);
+    printf("%s│%s Phase           %s│%s  Time       %s│%s Memory       %s│%s\n", COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_RESET);
+    printf("%s├─────────────────┼─────────────┼──────────────┤%s\n", COL_GRAY, COL_RESET);
 
-    // --- TIMING ---
-    printf("\n%sPERFORMANCE METRICS%s\n", COL_BOLD, COL_RESET);
-    printf("%s┌─────────────────┬───────────┬──────────────────┬────────────┬────────────┐%s\n", COL_GRAY, COL_RESET);
-    printf("%s│%s Phase           %s│%s  Time     %s│%s Distribution     %s│%s Percentage %s│%s ns/Token   %s│%s\n", COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_RESET);
-    printf("%s├─────────────────┼───────────┼──────────────────┼────────────┼────────────┤%s\n", COL_GRAY, COL_RESET);
-
-    // Tokenization
-    double pct = stats->time_tokenize_ms / total_time;
-    printf("%s│%s Tokenization    %s│%s %6.3f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_tokenize_ms, COL_GRAY, COL_GREEN);
-    print_bar(pct);
-    printf("%s│%s     %5.1f%% %s│%s %9.1f  %s│%s\n", COL_GRAY, COL_RESET, pct * 100.0, COL_GRAY, COL_RESET, (stats->time_tokenize_ms * 1e6) / stats->token_count, COL_GRAY, COL_RESET);
-
-    // Parsing
-    pct = stats->time_parse_ms / total_time;
-    printf("%s│%s Parsing         %s│%s %6.3f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_parse_ms, COL_GRAY, COL_GREEN);
-    print_bar(pct);
-    printf("%s│%s     %5.1f%% %s│%s %9.1f  %s│%s\n", COL_GRAY, COL_RESET, pct * 100.0, COL_GRAY, COL_RESET, (stats->time_parse_ms * 1e6) / stats->token_count, COL_GRAY, COL_RESET);
-
-    // Semantics
-    pct = stats->time_sema_ms / total_time;
-    printf("%s│%s Semantics       %s│%s %6.3f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_sema_ms, COL_GRAY, COL_GREEN);
-    print_bar(pct);
-    printf("%s│%s     %5.1f%% %s│%s %9.1f  %s│%s\n", COL_GRAY, COL_RESET, pct * 100.0, COL_GRAY, COL_RESET, (stats->time_sema_ms * 1e6) / stats->token_count, COL_GRAY, COL_RESET);
-
-    // Codegen
-    pct = stats->time_codegen_ms / total_time;
-    printf("%s│%s Code Generation %s│%s %6.3f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_codegen_ms, COL_GRAY, COL_GREEN);
-    print_bar(pct);
-    printf("%s│%s     %5.1f%% %s│%s %9.1f  %s│%s\n", COL_GRAY, COL_RESET, pct * 100.0, COL_GRAY, COL_RESET, (stats->time_codegen_ms * 1e6) / stats->token_count, COL_GRAY, COL_RESET);
-
-    printf("%s└─────────────────┴───────────┴──────────────────┴────────────┴────────────┘%s\n", COL_GRAY, COL_RESET);
-
-    // --- MEMORY ---
-    printf("\n%sMEMORY USAGE%s\n", COL_BOLD, COL_RESET);
-    printf("%s┌──────────────────────┬─────────────┬──────────────┐%s\n", COL_GRAY, COL_RESET);
-    printf("%s│%s Metric               %s│%s Value       %s│%s Bytes/Token  %s│%s\n", COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, COL_GRAY, COL_RESET);
-    printf("%s├──────────────────────┼─────────────┼──────────────┤%s\n", COL_GRAY, COL_RESET);
-    
-    printf("%s│%s Arena (Lexing)       %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
+    printf("%s│%s Lexical         %s│%s %8.2f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_tokenize_ms, COL_GRAY, COL_RESET);
     print_mem_unit(stats->mem_lex_bytes);
-    printf("%s│%s %10.1f B %s│%s\n", COL_GRAY, COL_RESET, (double)stats->mem_lex_bytes / stats->token_count, COL_GRAY, COL_RESET);
+    printf("%s│%s\n", COL_GRAY, COL_RESET);
 
-    printf("%s│%s Arena (Parsing)      %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
+    printf("%s│%s Parsing         %s│%s %8.2f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_parse_ms, COL_GRAY, COL_RESET);
     print_mem_unit(stats->mem_parse_bytes);
-    printf("%s│%s %10.1f B %s│%s\n", COL_GRAY, COL_RESET, (double)stats->mem_parse_bytes / stats->token_count, COL_GRAY, COL_RESET);
+    printf("%s│%s\n", COL_GRAY, COL_RESET);
 
-    printf("%s│%s Arena (Semantics)    %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
+    printf("%s│%s Semantic        %s│%s %8.2f ms %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_sema_ms, COL_GRAY, COL_RESET);
     print_mem_unit(stats->mem_sema_bytes);
-    printf("%s│%s %10.1f B %s│%s\n", COL_GRAY, COL_RESET, (double)stats->mem_sema_bytes / stats->token_count, COL_GRAY, COL_RESET);
+    printf("%s│%s\n", COL_GRAY, COL_RESET);
 
-    printf("%s│%s Arena Total          %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
+    printf("%s│%s Codegen         %s│%s %8.2f ms %s│%s      -       %s│%s\n", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET, stats->time_codegen_ms, COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
+
+    printf("%s├─────────────────┼─────────────┼──────────────┤%s\n", COL_GRAY, COL_RESET);
+    printf("%s│%s TOTAL           %s│%s %8.2f ms %s│%s", COL_GRAY, COL_BOLD, COL_GRAY, COL_BOLD, total_time, COL_GRAY, COL_BOLD);
     print_mem_unit(total_mem);
-    printf("%s│%s %10.1f B %s│%s\n", COL_GRAY, COL_RESET, (double)total_mem / stats->token_count, COL_GRAY, COL_RESET);
+    printf("%s│%s\n", COL_GRAY, COL_RESET);
+    printf("%s└─────────────────┴─────────────┴──────────────┘%s\n", COL_GRAY, COL_RESET);
 
-    printf("%s│%s RSS Delta            %s│%s", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
-    print_mem_unit(stats->rss_delta_bytes);
-    printf("%s│%s              %s│%s\n", COL_GRAY, COL_RESET, COL_GRAY, COL_RESET);
-    printf("%s└──────────────────────┴─────────────┴──────────────┘%s\n", COL_GRAY, COL_RESET);
-
-    // --- SUMMARY ---
-    printf("\n%sSUMMARY%s\n", COL_BOLD, COL_RESET);
-    printf("  Total Time: %.3f ms\n", total_time);
-    printf("  Tokens:     %zu\n", stats->token_count);
-    printf("  AST Nodes:  %zu\n", ast_nodes);
-    printf("  Throughput: %.2f MB/s (tokens/sec: %zu)\n\n", throughput, tps);
+    printf("  %sNodes:%s %zu  %sThroughput:%s %.2f MB/s\n\n", COL_GRAY, COL_RESET, ast_nodes, COL_GRAY, COL_RESET, throughput);
 }
