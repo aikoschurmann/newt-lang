@@ -18,8 +18,7 @@
 #include "metrics.h"
 #include "utils.h"
 #include "codegen.h"
-
-
+#include "module_loader.h"
 
 // Exit codes
 #define EXIT_OK    0
@@ -28,87 +27,6 @@
 #define EXIT_LEX   3
 #define EXIT_PARSE 4
 #define EXIT_TYPE  5
-
-typedef struct {
-    Arena *arena;
-    Options *opts;
-    DenseArenaInterner *keywords;
-    DenseArenaInterner *identifiers;
-    DenseArenaInterner *strings;
-    HashMap *visited_modules; // char* -> bool
-    AstNode *merged_program;
-} ModuleLoader;
-
-static int load_module_recursive(ModuleLoader *loader, const char *path) {
-    // 1. Avoid circularity
-    if (hashmap_get(loader->visited_modules, (void*)path, str_hash, str_cmp)) {
-        return EXIT_OK;
-    }
-    hashmap_put(loader->visited_modules, (void*)path, (void*)1, str_hash, str_cmp);
-
-    if (loader->opts->verbose) printf("Loading module: %s\n", path);
-
-    // 2. Read Source
-    char *src = read_file(path);
-    if (!src) {
-        fprintf(stderr, "Error: Failed to read file: %s\n", path);
-        return EXIT_IO;
-    }
-    size_t src_len = strlen(src);
-
-    // 3. Lexing (Shared Interners)
-    Lexer *lexer = lexer_create_ex(src, src_len, loader->arena, loader->keywords, loader->identifiers, loader->strings);
-    if (!lexer_lex_all(lexer)) {
-        fprintf(stderr, "Error: Lexing failed for %s\n", path);
-        free(src);
-        return EXIT_LEX;
-    }
-
-    // 4. Parsing
-    Parser *parser = parser_create(lexer->tokens, (char*)path, loader->arena);
-    ParseError parse_err = {0};
-    AstNode *module_ast = parse_program(parser, &parse_err);
-    if (parse_err.message) {
-        print_parse_error(&parse_err);
-        free(src);
-        return EXIT_PARSE;
-    }
-
-    if (!module_ast) {
-        free(src);
-        return EXIT_OK;
-    }
-
-    // 5. Recursive Loading and Merging
-    AstProgram *module_prog = &module_ast->data.program;
-    for (size_t i = 0; i < module_prog->decls->count; i++) {
-        AstNode *decl = *(AstNode**)dynarray_get(module_prog->decls, i);
-        
-        if (decl->node_type == AST_IMPORT_DECLARATION) {
-            // Simple path resolution: input/<module_name>.tn
-            Slice *mod_name = (Slice*)decl->data.import_declaration.module_name->key;
-            char mod_path[256];
-            snprintf(mod_path, sizeof(mod_path), "input/%.*s.tn", (int)mod_name->len, mod_name->ptr);
-            
-            // Intern the path string so it survives recursion and can be used as hash key
-            char *interned_path = arena_alloc(loader->arena, strlen(mod_path) + 1);
-            strcpy(interned_path, mod_path);
-
-            int res = load_module_recursive(loader, interned_path);
-            if (res != EXIT_OK) {
-                free(src);
-                return res;
-            }
-        } else {
-            // Add non-import declarations to the global pool
-            dynarray_push_value(loader->merged_program->data.program.decls, &decl);
-        }
-    }
-
-    // Note: We don't free 'src' yet because tokens/slices might point into it
-    // In a production compiler, we'd probably copy lexemes to the arena
-    return EXIT_OK;
-}
 
 int main(int argc, char **argv) {
     codegen_initialize();
@@ -139,9 +57,6 @@ int main(int argc, char **argv) {
     DenseArenaInterner *strings = intern_table_create(hashmap_create(128), arena, string_copy_func, slice_hash, slice_cmp);
 
     /* Pre-intern keywords */
-    extern TokenType get_keyword_type(const char *word); // Use a helper if needed or just copy the list
-    // Actually, lexer_create usually does this. I'll manually seed them or let the first lexer do it.
-    // For simplicity, I'll just use lexer_create for the first one or just seed here.
     const char *kw_list[] = {"fn", "if", "else", "while", "for", "return", "break", "continue", "const", "pub", "import", "struct", "as", "i32", "i64", "bool", "f32", "f64", "str", "char", "void", "true", "false", NULL};
     const TokenType kw_types[] = {TOK_FN, TOK_IF, TOK_ELSE, TOK_WHILE, TOK_FOR, TOK_RETURN, TOK_BREAK, TOK_CONTINUE, TOK_CONST, TOK_PUB, TOK_IMPORT, TOK_STRUCT, TOK_AS, TOK_I32, TOK_I64, TOK_BOOL, TOK_F32, TOK_F64, TOK_STRING, TOK_CHAR, TOK_VOID, TOK_TRUE, TOK_FALSE};
     for(int i=0; kw_list[i]; i++) {
@@ -149,22 +64,10 @@ int main(int argc, char **argv) {
         intern(keywords, &s, (void*)(uintptr_t)kw_types[i]);
     }
 
-    AstNode *merged_program = ast_create_node(AST_PROGRAM, arena);
-    merged_program->data.program.decls = arena_alloc(arena, sizeof(DynArray));
-    dynarray_init_in_arena(merged_program->data.program.decls, arena, sizeof(AstNode*), 32);
-
-    ModuleLoader loader = {
-        .arena = arena,
-        .opts = &opts,
-        .keywords = keywords,
-        .identifiers = identifiers,
-        .strings = strings,
-        .visited_modules = hashmap_create(16),
-        .merged_program = merged_program
-    };
+    ModuleLoader *loader = module_loader_create(arena, &opts, keywords, identifiers, strings);
 
     // Recursive Load
-    exit_code = load_module_recursive(&loader, path);
+    exit_code = load_module_recursive(loader, path);
     if (exit_code != EXIT_OK) goto cleanup;
 
     double t_load_end = now_seconds();
@@ -181,7 +84,7 @@ int main(int argc, char **argv) {
     TypeStore *store = typestore_create(arena, identifiers, keywords);
     TypeCheckContext type_ctx = typecheck_context_create(
         arena, 
-        merged_program, 
+        loader->merged_program, 
         store, 
         identifiers, 
         keywords, 
@@ -209,7 +112,7 @@ int main(int argc, char **argv) {
     // ---------------------------------------------------------
     if (opts.verbose) printf("Code Generation...\n");
     double t5 = now_seconds();
-    CodegenContext *cg_ctx = codegen_context_create(merged_program, store, "main_module", opts.opt_level);
+    CodegenContext *cg_ctx = codegen_context_create(loader->merged_program, store, "main_module", opts.opt_level);
     if (codegen_program(cg_ctx) == 0) {
         if (opts.print_ir) codegen_dump_module(cg_ctx);
 
@@ -242,7 +145,7 @@ int main(int argc, char **argv) {
     // Reporting
     if (opts.print_ast) {
         printf("--- AST ---\n");
-        print_ast(merged_program, 0, keywords, identifiers, strings);
+        print_ast(loader->merged_program, 0, keywords, identifiers, strings);
     }
     if (opts.print_time) {
         printf("\n--- Metrics ---\n");

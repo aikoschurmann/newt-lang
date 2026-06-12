@@ -604,11 +604,20 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         }
 
         // The first argument of @alloc is the type T to allocate.
-        // It evaluated to T itself (e.g. TYPE_STRUCT). We want to return *T.
+        // It could be an AST_TYPE node or an expression evaluating to a type.
         if (arg_count > 0) {
             AstNode *type_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
-            if (type_arg && type_arg->type) {
-                Type proto = { .kind = TYPE_POINTER, .as.ptr.base = type_arg->type };
+            Type *allocated_type = NULL;
+            
+            if (type_arg->node_type == AST_TYPE) {
+                allocated_type = resolve_ast_type(ctx, scope, type_arg);
+                type_arg->type = allocated_type;
+            } else {
+                allocated_type = type_arg->type;
+            }
+
+            if (allocated_type) {
+                Type proto = { .kind = TYPE_POINTER, .as.ptr.base = allocated_type };
                 InternResult *res = intern_type(ctx->store, &proto);
                 if (res && res->key) {
                     node->type = (Type*)((Slice*)res->key)->ptr;

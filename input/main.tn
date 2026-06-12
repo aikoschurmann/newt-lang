@@ -5,8 +5,11 @@ struct Node {
     next: *Node;
 }
 
+pub const b: i32 = 10;
+
 fn main() {
     a: Allocator = get_c_allocator();
+
     
     // [10] -> [20] -> [30] -> null
     print("Allocating nodes...\n");

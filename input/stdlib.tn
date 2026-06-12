@@ -1,8 +1,8 @@
 @link("malloc")
-pub fn libc_malloc(size: i64) -> *void;
+fn libc_malloc(size: i64) -> *void;
 
 @link("free")
-pub fn libc_free(ptr: *void) -> void;
+fn libc_free(ptr: *void) -> void;
 
 pub struct Allocator {
     ctx: *void;

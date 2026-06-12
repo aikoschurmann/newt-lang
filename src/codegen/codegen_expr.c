@@ -146,8 +146,43 @@ LLVMValueRef codegen_expr_struct_literal(CodegenContext *ctx, AstNode *expr) {
     return LLVMBuildLoad2(ctx->builder, struct_ty, alloca, "struct_val");
 }
 
+LLVMValueRef codegen_const_value(CodegenContext *ctx, Type *type, ConstValue *val) {
+    LLVMTypeRef ty = get_llvm_type(ctx, type);
+    if (val->type == INT_LITERAL) {
+        if (LLVMGetTypeKind(ty) == LLVMPointerTypeKind) {
+            if (val->value.int_val == 0) return LLVMConstNull(ty);
+            return LLVMConstIntToPtr(LLVMConstInt(LLVMInt64TypeInContext(ctx->context), val->value.int_val, 0), ty);
+        }
+        return LLVMConstInt(ty, val->value.int_val, 0);
+    } else if (val->type == FLOAT_LITERAL) {
+        return LLVMConstReal(ty, val->value.float_val);
+    } else if (val->type == BOOL_LITERAL) {
+        return LLVMConstInt(ty, val->value.bool_val, 0);
+    } else if (val->type == CHAR_LITERAL) {
+        return LLVMConstInt(ty, (unsigned char)val->value.char_val, 0);
+    } else if (val->type == STRING_LITERAL) {
+        InternResult *res = val->value.string_val;
+        Slice *s = (Slice*)res->key;
+        char *str = malloc(s->len + 1);
+        memcpy(str, s->ptr, s->len);
+        str[s->len] = '\0';
+        LLVMValueRef gstr = LLVMBuildGlobalStringPtr(ctx->builder, str, "str_lit");
+        free(str);
+        return gstr;
+    }
+    return LLVMConstNull(ty);
+}
+
 LLVMValueRef codegen_expr(CodegenContext *ctx, AstNode *expr) {
     if (!expr) return NULL;
+    
+    // If we have a constant value from semantic analysis, use it.
+    // However, string literals still need LLVMBuildGlobalStringPtr which requires a builder.
+    // For global initializers, we might need a different approach for strings.
+    if (expr->is_const_expr && expr->const_value.type != STRING_LITERAL) {
+        return codegen_const_value(ctx, expr->type, &expr->const_value);
+    }
+
     switch (expr->node_type) {
         case AST_LITERAL:          return codegen_expr_literal(ctx, expr);
         case AST_IDENTIFIER:       return codegen_expr_ident(ctx, expr);

@@ -30,19 +30,19 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
                 case PRIM_BOOL: return LLVMInt8TypeInContext(ctx->context);
                 case PRIM_CHAR: return LLVMInt8TypeInContext(ctx->context);
                 case PRIM_VOID: return LLVMVoidTypeInContext(ctx->context);
-                case PRIM_STR:  return LLVMPointerTypeInContext(ctx->context, 0);
+                case PRIM_STR:  return LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0);
                 default:        return LLVMInt32TypeInContext(ctx->context);
             }
         case TYPE_POINTER:
         case TYPE_FUNCTION: // In LLVM 15+ functions are opaque pointers when used as values/struct fields.
-            return LLVMPointerTypeInContext(ctx->context, 0);
+            return LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0);
         case TYPE_ARRAY:
             if (t->as.array.size_known) {
                 return LLVMArrayType(get_llvm_type(ctx, t->as.array.base), (unsigned int)t->as.array.size);
             } else {
                 // FAT POINTER (Slice): struct { T* ptr, i64 len }
                 LLVMTypeRef elements[] = {
-                    LLVMPointerTypeInContext(ctx->context, 0),
+                    LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0),
                     LLVMInt64TypeInContext(ctx->context)
                 };
                 return LLVMStructTypeInContext(ctx->context, elements, 2, 0);
