@@ -34,6 +34,8 @@ static const struct {
     {"break", TOK_BREAK},
     {"continue", TOK_CONTINUE},
     {"const", TOK_CONST},
+    {"pub", TOK_PUB},
+    {"import", TOK_IMPORT},
     {"struct", TOK_STRUCT},
     {"as", TOK_AS},
     {"i32", TOK_I32},
@@ -461,8 +463,9 @@ Token lexer_next_token(Lexer *lexer) {
             case '[' : token_type = TOK_LBRACKET; break;
             case ']' : token_type = TOK_RBRACKET; break;
             case ',' : token_type = TOK_COMMA; break;
-            case ';' : token_type = TOK_SEMICOLON; break;
-            case ':' : token_type = TOK_COLON; break;
+            case ';': token_type = TOK_SEMICOLON; break;
+            case ':': token_type = TOK_COLON; break;
+            case '@': token_type = TOK_AT; break;
             case '*':
                 if (next == '=') { lexer_advance(lexer); token_type = TOK_STAR_EQ; }
                 else token_type = TOK_STAR;
@@ -529,6 +532,8 @@ const char* token_type_to_string(TokenType type) {
         case TOK_BREAK: return "BREAK";
         case TOK_CONTINUE: return "CONTINUE";
         case TOK_CONST: return "CONST";
+        case TOK_PUB: return "PUB";
+        case TOK_IMPORT: return "IMPORT";
         case TOK_STRUCT: return "STRUCT";
         case TOK_I32: return "I32";
         case TOK_I64: return "I64";

@@ -10,6 +10,8 @@ static const char *node_type_to_string(AstNodeType type) {
         case AST_FUNCTION_DECLARATION: return "FunctionDeclaration";
         case AST_PARAM: return "Parameter";
         case AST_STRUCT_DECLARATION: return "StructDeclaration";
+        case AST_IMPORT_DECLARATION: return "ImportDeclaration";
+        case AST_INTRINSIC: return "IntrinsicCall";
         case AST_BLOCK: return "Block";
         case AST_IF_STATEMENT: return "IfStatement";
         case AST_WHILE_STATEMENT: return "WhileStatement";
@@ -305,6 +307,38 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
                     AstNode *decl = *(AstNode**)dynarray_get(node->data.program.decls, i);
                     print_ast_with_prefix(decl, depth + 1, i == node->data.program.decls->count - 1, keywords, identifiers, strings);
                 }
+            }
+            break;
+
+        case AST_IMPORT_DECLARATION:
+            print_tree_prefix(depth + 1, 1);
+            printf("module: ");
+            if (node->data.import_declaration.module_name && identifiers) {
+                const char *name = interner_get_cstr(identifiers, node->data.import_declaration.module_name->entry->dense_index);
+                printf("'%s'", name ? name : "?");
+            } else {
+                printf("(unknown)");
+            }
+            printf("\n");
+            break;
+            
+        case AST_INTRINSIC:
+            print_tree_prefix(depth + 1, 0);
+            printf("intrinsic: ");
+            if (node->data.intrinsic.kind == INTRINSIC_ALLOC) printf("@alloc\n");
+            else if (node->data.intrinsic.kind == INTRINSIC_FREE) printf("@free\n");
+            else printf("unknown\n");
+            
+            if (node->data.intrinsic.args && node->data.intrinsic.args->count > 0) {
+                print_tree_prefix(depth + 1, 1);
+                printf("arguments:\n");
+                for (size_t i = 0; i < node->data.intrinsic.args->count; ++i) {
+                    AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
+                    print_ast_with_prefix(arg, depth + 2, i == node->data.intrinsic.args->count - 1, keywords, identifiers, strings);
+                }
+            } else {
+                print_tree_prefix(depth + 1, 1);
+                printf("arguments: (none)\n");
             }
             break;
 

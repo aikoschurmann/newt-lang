@@ -20,6 +20,8 @@ typedef enum {
     TOK_BREAK,
     TOK_CONTINUE,
     TOK_CONST,
+    TOK_PUB,
+    TOK_IMPORT,
 
     // types
     TOK_I32,
@@ -69,6 +71,7 @@ typedef enum {
     TOK_SEMICOLON,
     TOK_COLON,
     TOK_PIPE,
+    TOK_AT,
 
     // literals
     TOK_FLOAT_LIT,

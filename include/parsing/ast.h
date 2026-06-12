@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "dense_arena_interner.h"
 #include "arena.h"
+#include "sema/intrinsics.h"
 
 /* ----------------------- Forward Declarations ----------------------- */
 typedef struct AstNode AstNode;
@@ -21,6 +22,8 @@ typedef enum {
     AST_FUNCTION_DECLARATION,
     AST_PARAM,
     AST_STRUCT_DECLARATION,
+    AST_IMPORT_DECLARATION,
+    AST_INTRINSIC,
 
     /* statements */
     AST_BLOCK,
@@ -69,6 +72,7 @@ typedef enum {
     BOOL_LITERAL,
     STRING_LITERAL,
     CHAR_LITERAL,
+    NULL_LITERAL,
     LIT_UNKNOWN /* used for error handling, not a real literal type */
 } LiteralType;
 
@@ -94,6 +98,7 @@ typedef struct {
     AstNode *type;           /* type node */
     InternResult *intern_result;  /* interned record for the variable name */
     int is_const;            /* boolean: 0 or 1 */
+    int is_pub;              /* visibility */
     AstNode *initializer;    /* optional */
 } AstVariableDeclaration;
 
@@ -101,7 +106,9 @@ typedef struct {
     AstNode *return_type;    /* AstNode of AST_TYPE */
     InternResult *intern_result;  /* interned record for the function name */
     DynArray *params;        /* AstParam nodes */
-    AstNode *body;           /* AstBlock */
+    AstNode *body;           /* AstBlock, may be NULL for @link */
+    InternResult *link_name; /* Optional: for @link("name") */
+    int is_pub;              /* visibility */
 } AstFunctionDeclaration;
 
 typedef struct {
@@ -115,8 +122,13 @@ typedef struct {
 } AstFieldDecl;
 
 typedef struct {
+    InternResult *module_name;   /* interned module path, e.g. "std.memory" */
+} AstImportDeclaration;
+
+typedef struct {
     InternResult *intern_result; // Struct name
     DynArray *fields;            // Contains AstFieldDecl*
+    int is_pub;                  // visibility
 } AstStructDeclaration;
 
 typedef struct {
@@ -229,6 +241,11 @@ struct AstNode {
         AstFunctionDeclaration function_declaration;
         AstParam param;
         AstStructDeclaration struct_declaration;
+        AstImportDeclaration import_declaration;
+        struct {
+            IntrinsicKind kind;
+            DynArray *args; // Array of AstNode*
+        } intrinsic;
         AstBlock block;
         AstIfStatement if_statement;
         AstWhileStatement while_statement;
