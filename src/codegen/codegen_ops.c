@@ -200,8 +200,16 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
             return LLVMBuildFNeg(ctx->builder, val, "fnegtmp");
         } else if (ue->op == OP_NOT) {
             LLVMValueRef val = codegen_expr(ctx, ue->expr);
+            LLVMTypeRef ty = LLVMTypeOf(val);
+            if (LLVMGetTypeKind(ty) == LLVMIntegerTypeKind) {
+                // Logical NOT: val == 0
+                LLVMValueRef res = LLVMBuildICmp(ctx->builder, LLVMIntEQ, val, LLVMConstInt(ty, 0, 0), "nottmp");
+                // Convert i1 result back to the original type (e.g. i8 for bool)
+                return LLVMBuildZExt(ctx->builder, res, ty, "not_bool");
+            }
             return LLVMBuildNot(ctx->builder, val, "nottmp");
-        } else if (ue->op == OP_POST_INC || ue->op == OP_POST_DEC ||
+        } 
+ else if (ue->op == OP_POST_INC || ue->op == OP_POST_DEC ||
                    ue->op == OP_PRE_INC  || ue->op == OP_PRE_DEC) {
             LLVMValueRef ptr = codegen_lvalue(ctx, ue->expr);
             LLVMTypeRef  ty  = get_llvm_type(ctx, ue->expr->type);

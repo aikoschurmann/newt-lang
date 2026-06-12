@@ -7,16 +7,38 @@ static LLVMValueRef codegen_intrinsic_print(CodegenContext *ctx, AstNode *arg, b
 
     const char *func_name = NULL;
     Type *t = arg->type;
+    LLVMTypeRef param_t = NULL;
 
     if (t->kind == TYPE_PRIMITIVE) {
         switch (t->as.primitive) {
-            case PRIM_I32:  func_name = "print_i32"; break;
-            case PRIM_I64:  func_name = "print_i64"; break;
-            case PRIM_F32:  func_name = "print_f32"; break;
-            case PRIM_F64:  func_name = "print_f64"; break;
-            case PRIM_BOOL: func_name = "print_bool"; break;
-            case PRIM_CHAR: func_name = "print_i32"; break; // Use i32 for char for now
-            case PRIM_STR:  func_name = "print_str"; break;
+            case PRIM_I32:  
+                func_name = "print_i32"; 
+                param_t = LLVMInt32TypeInContext(ctx->context);
+                break;
+            case PRIM_I64:  
+                func_name = "print_i64"; 
+                param_t = LLVMInt64TypeInContext(ctx->context);
+                break;
+            case PRIM_F32:  
+                func_name = "print_f32"; 
+                param_t = LLVMFloatTypeInContext(ctx->context);
+                break;
+            case PRIM_F64:  
+                func_name = "print_f64"; 
+                param_t = LLVMDoubleTypeInContext(ctx->context);
+                break;
+            case PRIM_BOOL: 
+                func_name = "print_bool"; 
+                param_t = LLVMInt8TypeInContext(ctx->context);
+                break;
+            case PRIM_CHAR: 
+                func_name = "print_char"; 
+                param_t = LLVMInt8TypeInContext(ctx->context);
+                break;
+            case PRIM_STR:  
+                func_name = "print_str"; 
+                param_t = LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0);
+                break;
             default: break;
         }
     }
@@ -25,14 +47,20 @@ static LLVMValueRef codegen_intrinsic_print(CodegenContext *ctx, AstNode *arg, b
 
     LLVMValueRef func = LLVMGetNamedFunction(ctx->module, func_name);
     if (!func) {
-        // Add prototype if not present
         LLVMTypeRef ret_ty = LLVMVoidTypeInContext(ctx->context);
-        LLVMTypeRef param_t = get_llvm_type(ctx, t);
         LLVMTypeRef fn_ty = LLVMFunctionType(ret_ty, &param_t, 1, 0);
         func = LLVMAddFunction(ctx->module, func_name, fn_ty);
     }
 
     LLVMValueRef val = codegen_expr(ctx, arg);
+    
+    // Ensure the value matches the parameter type
+    if (LLVMTypeOf(val) != param_t) {
+        if (t->as.primitive == PRIM_BOOL || t->as.primitive == PRIM_CHAR) {
+            // Already handled by bit-width consistency in codegen_types.c
+        }
+    }
+
     LLVMValueRef call = LLVMBuildCall2(ctx->builder, LLVMGlobalGetValueType(func), func, &val, 1, "");
 
     if (newline) {

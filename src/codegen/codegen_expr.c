@@ -4,6 +4,9 @@ LLVMValueRef codegen_expr_literal(CodegenContext *ctx, AstNode *expr) {
     if (expr->data.literal.type == INT_LITERAL) {
         LLVMTypeRef ty = get_llvm_type(ctx, expr->type);
         return LLVMConstInt(ty, expr->data.literal.value.int_val, 0);
+    } else if (expr->data.literal.type == CHAR_LITERAL) {
+        LLVMTypeRef ty = get_llvm_type(ctx, expr->type);
+        return LLVMConstInt(ty, (unsigned char)expr->data.literal.value.char_val, 0);
     } else if (expr->data.literal.type == BOOL_LITERAL) {
         LLVMTypeRef ty = get_llvm_type(ctx, expr->type);
         return LLVMConstInt(ty, expr->data.literal.value.bool_val, 0);

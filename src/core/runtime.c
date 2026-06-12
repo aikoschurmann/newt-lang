@@ -25,6 +25,10 @@ void print_str(const char *s) {
     printf("%s", s);
 }
 
+void print_char(char c) {
+    printf("%c", c);
+}
+
 void print_newline() {
     printf("\n");
 }

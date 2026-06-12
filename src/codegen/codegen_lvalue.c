@@ -50,11 +50,18 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
                 return LLVMBuildGEP2(ctx->builder, elem_ty, data_ptr, &idx, 1, "arrayidx");
             }
         } else {
-            // Pointer: target is the pointer itself (T*)
+            // Pointer or String: target is the pointer itself (T*) or (i8*)
             LLVMValueRef target = codegen_expr(ctx, sub->target);
-            LLVMTypeRef elem_ty = (target_type && target_type->kind == TYPE_POINTER)
-                                  ? get_llvm_type(ctx, target_type->as.ptr.base)
-                                  : LLVMInt32TypeInContext(ctx->context);
+            LLVMTypeRef elem_ty = NULL;
+            
+            if (target_type && target_type->kind == TYPE_POINTER) {
+                elem_ty = get_llvm_type(ctx, target_type->as.ptr.base);
+            } else if (target_type && target_type->kind == TYPE_PRIMITIVE && target_type->as.primitive == PRIM_STR) {
+                elem_ty = LLVMInt8TypeInContext(ctx->context);
+            } else {
+                elem_ty = LLVMInt32TypeInContext(ctx->context);
+            }
+            
             return LLVMBuildGEP2(ctx->builder, elem_ty, target, &idx, 1, "arrayidx");
         }
     }
