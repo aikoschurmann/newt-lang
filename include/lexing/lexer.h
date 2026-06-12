@@ -47,6 +47,12 @@ typedef struct Lexer {
  * Returns NULL on allocation failure. */
 Lexer* lexer_create(const char *source, size_t source_len, Arena *arena);
 
+/* Create a lexer with existing interners for module systems. */
+Lexer* lexer_create_ex(const char *source, size_t source_len, Arena *arena,
+                      DenseArenaInterner *keywords,
+                      DenseArenaInterner *identifiers,
+                      DenseArenaInterner *strings);
+
 /* Destroy lexer and free any heap allocations owned by the lexer.
  * Note: arena_destroy must be called separately if caller created the arena. */
 void lexer_destroy(Lexer *lexer);

@@ -284,6 +284,30 @@ static Slice unescape_string_into_arena(const Slice raw, Arena *arena) {
 Lexer* lexer_create(const char *source, size_t source_len, Arena *arena) {
     if (!source || !arena) return NULL;
 
+    DenseArenaInterner *keywords = intern_table_create(hashmap_create(32), arena, string_copy_func, slice_hash, slice_cmp);
+    DenseArenaInterner *identifiers = intern_table_create(hashmap_create(128), arena, string_copy_func, slice_hash, slice_cmp);
+    DenseArenaInterner *strings = intern_table_create(hashmap_create(64), arena, string_copy_func, slice_hash, slice_cmp);
+    
+    if (!keywords || !identifiers || !strings) return NULL;
+
+    /* Pre-intern keywords with TokenType as metadata */
+    for (size_t i = 0; KEYWORDS[i].word; i++) {
+        Slice slice = {
+            .ptr = (char*)KEYWORDS[i].word,
+            .len = strlen(KEYWORDS[i].word)
+        };
+        intern(keywords, &slice, (void*)(uintptr_t)KEYWORDS[i].type);
+    }
+
+    return lexer_create_ex(source, source_len, arena, keywords, identifiers, strings);
+}
+
+Lexer* lexer_create_ex(const char *source, size_t source_len, Arena *arena,
+                      DenseArenaInterner *keywords,
+                      DenseArenaInterner *identifiers,
+                      DenseArenaInterner *strings) {
+    if (!source || !arena) return NULL;
+
     Lexer *lexer = arena_alloc(arena, sizeof(Lexer));
     if (!lexer) return NULL;
 
@@ -298,19 +322,9 @@ Lexer* lexer_create(const char *source, size_t source_len, Arena *arena) {
     lexer->cur = source;
     lexer->end = source + source_len;
 
-    lexer->keywords = intern_table_create(hashmap_create(32), arena, string_copy_func, slice_hash, slice_cmp);
-    lexer->identifiers = intern_table_create(hashmap_create(128), arena, string_copy_func, slice_hash, slice_cmp);
-    lexer->strings = intern_table_create(hashmap_create(64), arena, string_copy_func, slice_hash, slice_cmp);
-    if (!lexer->keywords || !lexer->identifiers || !lexer->strings) return NULL;
-
-    /* Pre-intern keywords with TokenType as metadata */
-    for (size_t i = 0; KEYWORDS[i].word; i++) {
-        Slice slice = {
-            .ptr = (char*)KEYWORDS[i].word,
-            .len = strlen(KEYWORDS[i].word)
-        };
-        intern(lexer->keywords, &slice, (void*)(uintptr_t)KEYWORDS[i].type);
-    }
+    lexer->keywords = keywords;
+    lexer->identifiers = identifiers;
+    lexer->strings = strings;
 
     lexer->tokens = arena_alloc(arena, sizeof(DynArray));
     if (!lexer->tokens) return NULL;
@@ -323,8 +337,8 @@ Lexer* lexer_create(const char *source, size_t source_len, Arena *arena) {
 /* Destroy lexer */
 void lexer_destroy(Lexer *lexer) {
     if (!lexer) return;
-    intern_table_destroy(lexer->keywords, NULL, NULL);
-    intern_table_destroy(lexer->identifiers, NULL, NULL);
+    // Note: We don't destroy interners here as they might be shared or arena-owned.
+    // They will be cleaned up when the arena is destroyed.
     if (lexer->tokens) {
         dynarray_free(lexer->tokens);
         lexer->tokens = NULL;

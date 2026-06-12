@@ -50,5 +50,19 @@ static int ptr_identity_cmp(void *a, void *b) {
     return (a > b) - (a < b);
 }
 
+static size_t str_hash(void *key) {
+    const char *s = (const char *)key;
+    size_t h = (size_t)1469598103934665603ULL;
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= (size_t)1099511628211ULL;
+    }
+    return h;
+}
+
+static int str_cmp(void *a, void *b) {
+    return strcmp((const char *)a, (const char *)b);
+}
+
 double now_seconds(void);
 size_t get_peak_rss_kb(void);

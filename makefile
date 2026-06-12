@@ -101,12 +101,10 @@ clean:
 # Change this at the bottom of your Makefile
 
 run: release
-	$(Q)cat ./input/stdlib.tn ./input/main.tn > ./input/merged.tn
-	$(Q)./$(OUT_DIR)/$(NAME) ./input/merged.tn --run
+	$(Q)./$(OUT_DIR)/$(NAME) ./input/main.tn --run
 
 run-dev: dev
-	$(Q)cat ./input/stdlib.tn ./input/main.tn > ./input/merged.tn
-	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/merged.tn --run
+	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/main.tn --run
 
 test: $(OUT_DIR)/test_runner
 	$(Q)./$(OUT_DIR)/test_runner
