@@ -35,6 +35,7 @@ static const struct {
     {"continue", TOK_CONTINUE},
     {"const", TOK_CONST},
     {"struct", TOK_STRUCT},
+    {"as", TOK_AS},
     {"i32", TOK_I32},
     {"i64", TOK_I64},
     {"bool", TOK_BOOL},
@@ -42,6 +43,7 @@ static const struct {
     {"f64", TOK_F64},
     {"str", TOK_STRING},
     {"char", TOK_CHAR},
+    {"void", TOK_VOID},
     {"true", TOK_TRUE},
     {"false", TOK_FALSE},
     {NULL, TOK_UNKNOWN}  /* sentinel */
@@ -576,6 +578,8 @@ const char* token_type_to_string(TokenType type) {
         case TOK_SEMICOLON: return "SEMICOLON";
         case TOK_COLON: return "COLON";
         case TOK_EOF: return "EOF";
+        case TOK_AS: return "AS";
+        case TOK_VOID: return "VOID";
         default: return "UNKNOWN";
     }
 }

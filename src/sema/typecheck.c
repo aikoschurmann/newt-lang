@@ -179,6 +179,12 @@ static void resolve_function_decl(TypeCheckContext *ctx, Scope *scope, AstNode *
         AstNode *param_node = *(AstNode**)dynarray_get(decl->params, i);
         Type *pt = resolve_ast_type(ctx, scope, param_node->data.param.type);
         if (!pt) pt = ctx->store->t_void; 
+        
+        if (type_is_void(pt)) {
+            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = param_node->span, .filename = ctx->filename, .as.name.name = "Parameter cannot have type 'void'" };
+            dynarray_push_value(ctx->errors, &err);
+        }
+
         param_types[i] = pt;
         param_node->type = pt;
     }
@@ -272,8 +278,10 @@ static void check_initializer(TypeCheckContext *ctx, Scope *scope, AstNode *var_
         bool can_cast = type_can_implicit_cast(var_type, actual_type);
 
         // INFERENCE LOGIC: If variable is T[] (unknown size) and initializer is T[N] (known), update it.
-        // We do this if 'can_cast' is true OR if it's purely an array size refinement.
-        bool is_inference = (var_type->kind == TYPE_ARRAY && !var_type->as.array.size_known && actual_type->kind == TYPE_ARRAY);
+        // We do this ONLY if base types match exactly.
+        bool is_inference = (var_type->kind == TYPE_ARRAY && !var_type->as.array.size_known && 
+                             actual_type->kind == TYPE_ARRAY && 
+                             var_type->as.array.base == actual_type->as.array.base);
 
         if (is_inference) {
             var_node->type = actual_type;
@@ -314,7 +322,19 @@ void check_variable_declaration(TypeCheckContext *ctx, Scope *scope, AstNode *va
     Type *var_type = resolve_ast_type(ctx, scope, var_decl->type);
     if (!var_type) return; 
 
-    // FIX: Check for incomplete types (missing size without initializer)
+    // Forbid 'void' type for variables
+    if (type_is_void(var_type)) {
+        TypeError err = { 
+            .kind = TE_TYPE_MISMATCH, 
+            .span = var_node->span, 
+            .filename = ctx->filename,
+            .as.name.name = "Variable cannot have type 'void'" 
+        };
+        dynarray_push_value(ctx->errors, &err);
+        return;
+    }
+
+    // Check for incomplete types (missing size without initializer)
     if (!var_decl->initializer) {
         if (!is_type_complete(var_type)) {
             TypeError err = { 

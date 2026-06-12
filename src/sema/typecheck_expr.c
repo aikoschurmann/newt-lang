@@ -284,7 +284,9 @@ Type* check_subscript(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     Type *base_type = check_expression(ctx, scope, subscript->target, NULL);
     if (!base_type) return NULL;
 
-    if (base_type->kind != TYPE_ARRAY && base_type->kind != TYPE_POINTER) {
+    bool is_str = (base_type->kind == TYPE_PRIMITIVE && base_type->as.primitive == PRIM_STR);
+
+    if (base_type->kind != TYPE_ARRAY && base_type->kind != TYPE_POINTER && !is_str) {
         TypeError err = { .kind = TE_NOT_INDEXABLE, .span = subscript->target->span, .filename = ctx->filename, .as.bad_usage.actual = base_type };
         dynarray_push_value(ctx->errors, &err);
         return NULL;
@@ -296,6 +298,8 @@ Type* check_subscript(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         dynarray_push_value(ctx->errors, &err);
         return NULL;
     }
+
+    if (is_str) return ctx->store->t_char;
 
     if (base_type->kind == TYPE_ARRAY && base_type->as.array.size_known) {
         // Even if is_const_expr flag is missing (paranoia), check if it's a literal node
@@ -475,14 +479,12 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
         // Explicit Type Check & Cast
         if (actual_elem_type != base_expected) {
-            // FIX: Array Size Inference Logic
-            // If the expected type is an array of UNKNOWN size, and we inferred a concrete array of KNOWN size,
-            // we should PRESERVE the specific concrete type (to propagate size up), rather than casting down.
+            // Array Size Inference Logic
             bool is_array_refinement = (base_expected->kind == TYPE_ARRAY && !base_expected->as.array.size_known &&
                                         actual_elem_type->kind == TYPE_ARRAY && actual_elem_type->as.array.size_known);
 
             if (is_array_refinement && type_can_implicit_cast(base_expected, actual_elem_type)) {
-                // Compatible, so we keep actual_elem_type (the one with the size)
+                // Compatible size refinement
             } 
             else if (type_can_implicit_cast(base_expected, actual_elem_type)) {
                 insert_cast(ctx, node, base_expected);
@@ -508,7 +510,7 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
     Type *final_base = common_base ? common_base : base_expected;
     
-    // FIX: Prefer the inferred base if it provides more information (e.g. array size) than the expected base
+    // Prefer the inferred base if it provides more information than the expected base
     if (base_expected && common_base) {
         if (base_expected->kind == TYPE_ARRAY && !base_expected->as.array.size_known &&
             common_base->kind == TYPE_ARRAY && common_base->as.array.size_known) {
@@ -642,6 +644,11 @@ Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expe
                 dynarray_push_value(ctx->errors, &err);
                 return NULL; 
             }
+            if (type_is_void(operand_type->as.ptr.base)) {
+                TypeError err = { .kind = TE_UNOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.unop = { .op = unary->op, .operand = operand_type } };
+                dynarray_push_value(ctx->errors, &err);
+                return NULL;
+            }
             return operand_type->as.ptr.base;
         default: return NULL;
     }
@@ -670,49 +677,42 @@ Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *exp
     Type *rhs = check_expression(ctx, scope, bin->right, rhs_hint);
     if (!lhs || !rhs) return NULL;
 
+    // 1. Literal Inference: If one side is a literal, try to adapt it to the other side's type
     if (bin->left->node_type == AST_LITERAL && lhs != rhs) {
-        if (type_is_integer(lhs) && type_is_integer(rhs)) {
-             lhs = check_expression(ctx, scope, bin->left, rhs);
-        } else if (type_is_float(lhs) && type_is_float(rhs)) {
-             lhs = check_expression(ctx, scope, bin->left, rhs);
-        }
+         lhs = check_expression(ctx, scope, bin->left, rhs);
+    } 
+    else if (bin->right->node_type == AST_LITERAL && lhs != rhs) {
+         rhs = check_expression(ctx, scope, bin->right, lhs);
+    }
+
+    // 2. STRICTOR RULES: Operands must match exactly after inference
+    if (lhs != rhs) {
+        TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
+        dynarray_push_value(ctx->errors, &err);
+        return NULL;
     }
 
     Type *result_type = NULL;
 
     if (op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV || op == OP_MOD) {
-        if (!type_is_numeric(lhs) || !type_is_numeric(rhs)) { 
+        if (!type_is_numeric(lhs)) { 
             TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
             dynarray_push_value(ctx->errors, &err);
             return NULL; 
         }
-        result_type = unite_numeric_types(ctx, lhs, rhs);
-        if (!result_type) { 
-            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
-            dynarray_push_value(ctx->errors, &err);
-            return NULL; 
-        }
-        
-        if (lhs != result_type) insert_cast(ctx, bin->left, result_type);
-        if (rhs != result_type) insert_cast(ctx, bin->right, result_type);
+        result_type = lhs;
     } 
     else if (op == OP_EQ || op == OP_NEQ || op == OP_LT || op == OP_GT || op == OP_LE || op == OP_GE) {
-        Type *common = unite_numeric_types(ctx, lhs, rhs);
-        if (!common && (op == OP_EQ || op == OP_NEQ)) {
-            if (lhs == rhs && lhs->kind == TYPE_POINTER) common = lhs;
+        // Disallow struct/array equality for now
+        if (lhs->kind != TYPE_PRIMITIVE && lhs->kind != TYPE_POINTER) {
+             TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
+             dynarray_push_value(ctx->errors, &err);
+             return NULL;
         }
-        if (!common) { 
-            TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
-            dynarray_push_value(ctx->errors, &err);
-            return NULL; 
-        }
-
-        if (lhs != common) insert_cast(ctx, bin->left, common);
-        if (rhs != common) insert_cast(ctx, bin->right, common);
         result_type = ctx->store->t_bool;
     }
     else if (op == OP_AND || op == OP_OR) {
-        if (lhs != ctx->store->t_bool || rhs != ctx->store->t_bool) { 
+        if (lhs != ctx->store->t_bool) { 
             TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = op, .left = lhs, .right = rhs } };
             dynarray_push_value(ctx->errors, &err);
             return NULL; 
@@ -722,6 +722,7 @@ Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *exp
 
     if (bin->left->is_const_expr && bin->right->is_const_expr) {
         fold_binary_op(expr, op, bin->left, bin->right);
+        // Correct const value type if needed (e.g. promoted in literal inference)
         if (result_type && type_is_float(result_type) && expr->const_value.type == INT_LITERAL) {
             expr->const_value.type = FLOAT_LITERAL;
             expr->const_value.value.float_val = (double)expr->const_value.value.int_val;
@@ -806,6 +807,84 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     }
 }
 
+Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
+    AstCastExpr *cast = &expr->data.cast_expr;
+    
+    // Resolve the target type from the type node (if it's an explicit 'as' cast)
+    if (cast->target_type_node) {
+        cast->target_type = resolve_ast_type(ctx, scope, cast->target_type_node);
+    }
+    
+    if (!cast->target_type) return NULL;
+
+    Type *src_type = check_expression(ctx, scope, cast->expr, NULL);
+    if (!src_type) return NULL;
+
+    // Validation logic for explicit casts
+    bool valid = false;
+
+    // 1. Numeric <-> Numeric (iN, fN, char)
+    if ((type_is_numeric(src_type) || type_is_char(src_type)) && 
+        (type_is_numeric(cast->target_type) || type_is_char(cast->target_type))) {
+        valid = true;
+    } 
+    // 2. Bool -> Numeric (0 or 1)
+    else if (type_is_bool(src_type) && (type_is_numeric(cast->target_type) || type_is_char(cast->target_type))) {
+        valid = true;
+    }
+    // 3. Pointer -> Pointer
+    else if (src_type->kind == TYPE_POINTER && cast->target_type->kind == TYPE_POINTER) {
+        valid = true;
+    }
+    // 4. Pointer <-> Integer (Bit reinterpretation)
+    else if ((src_type->kind == TYPE_POINTER && type_is_integer(cast->target_type)) ||
+             (type_is_integer(src_type) && cast->target_type->kind == TYPE_POINTER)) {
+        valid = true; 
+    }
+    // 5. Array -> Slice (Decay)
+    else if (src_type->kind == TYPE_ARRAY && cast->target_type->kind == TYPE_ARRAY && !cast->target_type->as.array.size_known) {
+        if (src_type->as.array.base == cast->target_type->as.array.base) {
+            valid = true;
+        }
+    }
+
+    if (!valid) {
+        TypeError err = { 
+            .kind = TE_TYPE_MISMATCH, 
+            .span = expr->span, 
+            .filename = ctx->filename, 
+            .as.mismatch = { .expected = cast->target_type, .actual = src_type } 
+        };
+        dynarray_push_value(ctx->errors, &err);
+        return NULL;
+    }
+
+    // Constant folding for casts
+    if (cast->expr->is_const_expr) {
+        expr->is_const_expr = 1;
+        expr->const_value = cast->expr->const_value;
+        
+        if (type_is_bool(src_type)) {
+             expr->const_value.type = INT_LITERAL;
+             expr->const_value.value.int_val = cast->expr->const_value.value.bool_val ? 1 : 0;
+        }
+
+        if (type_is_float(cast->target_type)) {
+            expr->const_value.type = FLOAT_LITERAL;
+            if (type_is_integer(src_type) || type_is_char(src_type)) {
+                expr->const_value.value.float_val = (double)cast->expr->const_value.value.int_val;
+            }
+        } else if (type_is_integer(cast->target_type) || type_is_char(cast->target_type)) {
+            expr->const_value.type = type_is_char(cast->target_type) ? CHAR_LITERAL : INT_LITERAL;
+            if (type_is_float(src_type)) {
+                expr->const_value.value.int_val = (int64_t)cast->expr->const_value.value.float_val;
+            }
+        }
+    }
+
+    return cast->target_type;
+}
+
 Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     if (!expr) return NULL;
     
@@ -844,7 +923,7 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
             result_type = check_initializer_list(ctx, scope, expr, expected_type);
             break;
         case AST_CAST:
-            result_type = expr->data.cast_expr.target_type;
+            result_type = check_cast(ctx, scope, expr);
             break;
         default: break;
     }

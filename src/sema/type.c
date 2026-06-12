@@ -260,6 +260,7 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
     register_prim(ts, keywords, "bool", ts->t_bool);
     register_prim(ts, keywords, "char", ts->t_char);
     register_prim(ts, keywords, "str", ts->t_str);
+    register_prim(ts, keywords, "void", ts->t_void);
 
     // Pre-intern "len" for O(1) field lookup on arrays/slices
     Slice len_slice = { .ptr = "len", .len = 3 };

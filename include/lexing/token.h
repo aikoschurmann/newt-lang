@@ -29,6 +29,7 @@ typedef enum {
     TOK_F64,
     TOK_STRING,
     TOK_CHAR,
+    TOK_VOID,
 
     // operators
     TOK_PLUSPLUS,
@@ -81,9 +82,10 @@ typedef enum {
     TOK_IDENTIFIER,
     TOK_COMMENT,
     TOK_EOF,
-    TOK_UNKNOWN,
+    TOK_STRUCT,
+    TOK_AS,
+    TOK_UNKNOWN
 
-    TOK_STRUCT
 } TokenType;
 
 

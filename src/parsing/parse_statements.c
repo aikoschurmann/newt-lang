@@ -314,7 +314,7 @@ AstNode *parse_variable_declaration(Parser *p, ParseError *err) {
     /* optional initializer */
     AstNode *initializer = NULL;
     
-    // FIX: parser_match consumes the token, so we should NOT call consume() again
+    // parser_match consumes the token, so we should NOT call consume() again
     if (parser_match(p, TOK_ASSIGN)) {
         // Token *assign_tok = consume(p, TOK_ASSIGN); // REMOVED (Double consume bug)
 
@@ -432,7 +432,7 @@ AstNode *parse_type(Parser *p, ParseError *err) {
     token = current_token(p);
 
     /* arrays: [ <const-expr>? ] */
-    /* FIX: Parse dimensions into a list, then wrap REVERSELY (Right-to-Left) */
+    /* Parse dimensions into a list, then wrap REVERSELY (Right-to-Left) */
     DynArray *dims = alloc_dynarray(p, err, sizeof(AstNode*), 4, "out of memory for array dimensions");
     if (!dims) return NULL;
 
@@ -537,8 +537,8 @@ InternResult *get_base_type(Parser *p, ParseError *err) {
     Token *tok = current_token(p);
     if (!tok) { if (err) create_parse_error(err, p, "unexpected end of input while looking for base type", NULL); return NULL; }
 
-    /* base types are contiguous in token enum between TOK_I32 and TOK_CHAR, plus identifiers for structs */
-    if ((tok->type >= TOK_I32 && tok->type <= TOK_CHAR) || tok->type == TOK_IDENTIFIER) {
+    /* base types are contiguous in token enum between TOK_I32 and TOK_VOID, plus identifiers for structs */
+    if ((tok->type >= TOK_I32 && tok->type <= TOK_VOID) || tok->type == TOK_IDENTIFIER) {
         consume(p, tok->type);
         return tok->record;
     }
@@ -809,7 +809,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
     if (!primary) return NULL;
 
     Token *token = current_token(p);
-    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT)) {
+    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT || token->type == TOK_AS)) {
         if (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS) {
             Token *op_tok = token;
             AstNode *postfix = new_node_or_err(p, AST_UNARY_EXPR, err, "out of memory creating postfix node");
@@ -869,6 +869,19 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
             member_access->data.member_expr.member = name_tok->record;
             member_access->span = span_join(&primary->span, &name_tok->span);
             primary = member_access;
+        } else if (token->type == TOK_AS) {
+            consume(p, TOK_AS);
+            AstNode *target_type_node = parse_type(p, err);
+            if (!target_type_node) return NULL;
+
+            AstNode *cast = new_node_or_err(p, AST_CAST, err, "out of memory creating cast node");
+            if (!cast) return NULL;
+
+            cast->data.cast_expr.expr = primary;
+            cast->data.cast_expr.target_type = NULL;
+            cast->data.cast_expr.target_type_node = target_type_node;
+            cast->span = span_join(&primary->span, &target_type_node->span);
+            primary = cast;
         }
 
         token = current_token(p);
@@ -1359,7 +1372,7 @@ AstNode *parse_statement(Parser *p, ParseError *err) {
             if (err) create_parse_error(err, p, "function declarations are not allowed inside statements or blocks", tok);
             return NULL;
         case TOK_CONST:
-            /* FIX: Allow const declarations as statements */
+            /* Allow const declarations as statements */
             stmt = parse_declaration_stmt(p, err);
             break;
         case TOK_IDENTIFIER: {

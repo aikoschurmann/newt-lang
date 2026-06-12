@@ -177,6 +177,7 @@ typedef struct {
 typedef struct {
     AstNode *expr;
     Type *target_type;
+    AstNode *target_type_node;
 } AstCastExpr;
 
 

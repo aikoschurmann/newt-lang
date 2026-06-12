@@ -26,6 +26,24 @@ bool type_is_char(Type *t) {
     return t->as.primitive == PRIM_CHAR;
 }
 
+bool type_is_void(Type *t) {
+    if (!t) return false;
+    if (t->kind != TYPE_PRIMITIVE) return false;
+    return t->as.primitive == PRIM_VOID;
+}
+
+bool type_is_pointer_to_void(Type *t) {
+    if (!t || t->kind != TYPE_POINTER) return false;
+    return type_is_void(t->as.ptr.base);
+}
+
+bool type_is_pointer_like(Type *t) {
+    if (!t) return false;
+    if (t->kind == TYPE_POINTER) return true;
+    if (t->kind == TYPE_PRIMITIVE && t->as.primitive == PRIM_STR) return true;
+    return false;
+}
+
 bool type_is_numeric(Type *t) {
     return type_is_integer(t) || type_is_float(t);
 }
@@ -34,38 +52,42 @@ bool type_can_implicit_cast(Type *target, Type *source) {
     if (!target || !source) return false;
     if (target == source) return true;
 
-    // 1. Numeric Promotions
-    // Int -> Int (Promotion & Narrowing)
-    if (type_is_integer(source) && type_is_integer(target)) {
-        if (source->as.primitive == PRIM_I32 && target->as.primitive == PRIM_I64) return true;
-        if (source->as.primitive == PRIM_I64 && target->as.primitive == PRIM_I32) return true; // Allow narrowing for now
-    }
-    // Float -> Float (Promotion)
-    if (type_is_float(source) && type_is_float(target)) {
-        if (source->as.primitive == PRIM_F32 && target->as.primitive == PRIM_F64) return true;
-    }
-    // Int -> Float (Conversion)
-    if (type_is_integer(source) && type_is_float(target)) {
-        return true; 
+    // 1. Lossless Widening ONLY (Rust-strict style)
+    if (source->kind == TYPE_PRIMITIVE && target->kind == TYPE_PRIMITIVE) {
+        PrimitiveKind s = source->as.primitive;
+        PrimitiveKind t = target->as.primitive;
+
+        // i32 -> i64 (Lossless)
+        if (s == PRIM_I32 && t == PRIM_I64) return true;
+        // f32 -> f64 (Lossless)
+        if (s == PRIM_F32 && t == PRIM_F64) return true;
+        // i32 -> f64 (Exact in 53-bit mantissa)
+        if (s == PRIM_I32 && t == PRIM_F64) return true;
+        
+        // NOTE: i64 -> f64 is NOT implicit (precision loss for large values)
+        // NOTE: i32 -> f32 is NOT implicit (precision loss for large values)
+        // NOTE: No narrowing (i64 -> i32) is implicit.
     }
 
-    // 2. Array Relaxation / Compatibility
-    // Allows T[N] -> T[] and T[N][M] -> T[][]
+    // 2. Array Decay (T[N] -> T[])
+    // Tightened: base types must be IDENTICAL, no recursive implicit casting.
     if (target->kind == TYPE_ARRAY && source->kind == TYPE_ARRAY) {
-        // Target must be generic (unsized) OR sizes must match exactly
-        if (!target->as.array.size_known || 
-            (source->as.array.size_known && target->as.array.size == source->as.array.size)) {
-            
-            // Recursively check base types (e.g. check f32[] vs f32[2])
-            return type_can_implicit_cast(target->as.array.base, source->as.array.base);
+        if (!target->as.array.size_known) {
+            return target->as.array.base == source->as.array.base;
         }
     }
 
-    // 3. Pointer Relaxation (T[N]* -> T[]*)
+    // 3. Pointer Relaxation
     if (target->kind == TYPE_POINTER && source->kind == TYPE_POINTER) {
-        // A pointer is compatible if its base types are compatible
-        // This allows i64[6]* to cast to i64[]*
-        return type_can_implicit_cast(target->as.ptr.base, source->as.ptr.base);
+        // Safe: T* -> *void (Implicitly discarding type info)
+        if (type_is_void(target->as.ptr.base)) return true;
+
+        // Tightened: T[N]* -> T[]* only if T is identical
+        Type *sb = source->as.ptr.base;
+        Type *tb = target->as.ptr.base;
+        if (sb->kind == TYPE_ARRAY && tb->kind == TYPE_ARRAY && !tb->as.array.size_known) {
+             return tb->as.array.base == sb->as.array.base;
+        }
     }
 
     return false;
