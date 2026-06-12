@@ -443,6 +443,7 @@ static void check_statement(TypeCheckContext *ctx, Scope *scope, AstNode *stmt, 
         case AST_ASSIGNMENT_EXPR:
         case AST_CALL_EXPR:
         case AST_UNARY_EXPR: // Handles things like x++;
+        case AST_INTRINSIC: // Handles standalone intrinsics like @free(...)
             check_expression(ctx, scope, stmt, NULL);
             break;
         // -----------------------

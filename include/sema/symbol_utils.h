@@ -1,8 +1,10 @@
 #pragma once
-#include "scope.h"
-#include "type.h"
-#include "ast.h"
-#include "typecheck.h"
 
-void symbol_fill_const_value(Symbol *sym, ConstValue *out_cv);
+#include "sema/typecheck.h"
+#include "datastructures/scope.h"
+#include "parsing/ast.h"
+
+// Note the change to SymbolValue here!
 void define_symbol_or_error(TypeCheckContext *ctx, Scope *scope, InternResult *name, Type *type, SymbolValue kind, Span span);
+
+int is_lvalue_node(AstNode *node);

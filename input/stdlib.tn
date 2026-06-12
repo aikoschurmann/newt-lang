@@ -1,0 +1,73 @@
+@link("malloc")
+pub fn libc_malloc(size: i64) -> *void;
+
+@link("free")
+pub fn libc_free(ptr: *void) -> void;
+
+pub struct Allocator {
+    ctx: *void;
+    alloc: fn(*void, i64) -> *void;
+    free: fn(*void, *void) -> void;
+}
+
+pub fn c_alloc_impl(ctx: *void, size: i64) -> *void {
+    return libc_malloc(size);
+}
+
+pub fn c_free_impl(ctx: *void, ptr: *void) -> void {
+    libc_free(ptr);
+}
+
+pub fn get_c_allocator() -> Allocator {
+    return Allocator {
+        ctx: 0 as *void,
+        alloc: c_alloc_impl,
+        free: c_free_impl
+    };
+}
+
+pub struct Arena {
+    buffer: *char; // raw bytes
+    capacity: i64;
+    offset: i64;
+    backing_allocator: Allocator;
+}
+
+pub fn arena_alloc_impl(ctx: *void, size: i64) -> *void {
+    arena: *Arena = ctx as *Arena;
+    
+    // Check for Out-Of-Memory
+    if (arena.offset + size) > arena.capacity {
+        return 0 as *void; 
+    }
+    
+    // Bump the pointer
+    ptr: *void = ((arena.buffer as i64) + arena.offset) as *void;
+    arena.offset = arena.offset + size;
+    return ptr;
+}
+
+pub fn arena_free_impl(ctx: *void, ptr: *void) -> void {
+}
+
+pub fn create_arena(backing: Allocator, size: i64) -> Arena {
+    buf: *char = backing.alloc(backing.ctx, size) as *char;
+    return Arena {
+        buffer: buf,
+        capacity: size,
+        offset: 0,
+        backing_allocator: backing
+    };
+}
+
+pub fn get_arena_allocator(arena: *Arena) -> Allocator {
+    return Allocator {
+        ctx: arena as *void,
+        alloc: arena_alloc_impl,
+        free: arena_free_impl
+    };
+}
+
+pub fn destroy_arena(arena: *Arena) -> void {
+    arena.backing_allocator.free(arena.backing_allocator.ctx, arena.buffer as *void);
+}

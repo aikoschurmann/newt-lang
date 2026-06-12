@@ -167,7 +167,6 @@ AstNode *parse_declaration(Parser *p, ParseError *err) {
         consume(p, TOK_AT);
         Token *attr_name = consume(p, TOK_IDENTIFIER);
         if (attr_name) {
-            // FIX 1: Safely read the slice directly from the token
             if (attr_name->slice.len == 4 && memcmp(attr_name->slice.ptr, "link", 4) == 0) {
                 if (!consume(p, TOK_LPAREN)) {
                     if (err) create_parse_error(err, p, "expected '(' after @link", current_token(p));
@@ -1026,7 +1025,7 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
     if (!token) { if (err) create_parse_error(err, p, "unexpected end of input, expected primary expression", NULL); return NULL; }
 
     switch (token->type) {
-        // --- PHASE 3: THE INTRINSIC PARSER ---
+        
         case TOK_AT: {
             consume(p, TOK_AT);
             Token *name_tok = consume(p, TOK_IDENTIFIER);
@@ -1139,7 +1138,7 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
         case TOK_IDENTIFIER: {
             Token *peek_tok = peek(p, 1);
             if (peek_tok && peek_tok->type == TOK_LBRACE) {
-                // FIX 2: The Lookahead Ambiguity Fix
+                
                 // Ensure this is ACTUALLY a struct literal, not just an 'if' condition block!
                 Token *peek_2 = peek(p, 2);
                 Token *peek_3 = peek(p, 3);

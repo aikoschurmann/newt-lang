@@ -98,11 +98,15 @@ clean:
 	@echo "  CLEAN"
 	$(Q)rm -rf $(OBJ_DIR) $(OUT_DIR)
 
+# Change this at the bottom of your Makefile
+
 run: release
-	$(Q)./$(OUT_DIR)/$(NAME) ./input/test.tn --run
+	$(Q)cat ./input/stdlib.tn ./input/main.tn > ./input/merged.tn
+	$(Q)./$(OUT_DIR)/$(NAME) ./input/merged.tn --run
 
 run-dev: dev
-	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/test.tn --run
+	$(Q)cat ./input/stdlib.tn ./input/main.tn > ./input/merged.tn
+	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/merged.tn --run
 
 test: $(OUT_DIR)/test_runner
 	$(Q)./$(OUT_DIR)/test_runner

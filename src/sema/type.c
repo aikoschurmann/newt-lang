@@ -250,6 +250,14 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
     
     ts->t_void = create_primitive(ts, PRIM_VOID);
 
+
+    // 1. Manually create the void* type prototype
+    Type void_ptr_proto = { .kind = TYPE_POINTER, .as.ptr.base = ts->t_void };
+
+    // 2. Intern it to get the canonical Type*
+    InternResult *vp_res = intern_type(ts, &void_ptr_proto);
+    ts->t_void_ptr = (Type*)((Slice*)vp_res->key)->ptr;
+
    
 
     // Register KEYWORDS (lexed as TOK_I32 etc.)

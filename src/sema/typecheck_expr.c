@@ -590,9 +590,55 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
     return struct_type;
 }
 
+
+static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
+    AstNode *node = expr;
+    IntrinsicKind kind = node->data.intrinsic.kind;
+
+    if (kind == INTRINSIC_ALLOC) {
+        // 1. Check all arguments first to ensure they are valid
+        size_t arg_count = node->data.intrinsic.args ? node->data.intrinsic.args->count : 0;
+        for (size_t i = 0; i < arg_count; i++) {
+            AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
+            check_expression(ctx, scope, arg, NULL);
+        }
+
+        // The first argument of @alloc is the type T to allocate.
+        // It evaluated to T itself (e.g. TYPE_STRUCT). We want to return *T.
+        if (arg_count > 0) {
+            AstNode *type_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
+            if (type_arg && type_arg->type) {
+                Type proto = { .kind = TYPE_POINTER, .as.ptr.base = type_arg->type };
+                InternResult *res = intern_type(ctx->store, &proto);
+                if (res && res->key) {
+                    node->type = (Type*)((Slice*)res->key)->ptr;
+                }
+            }
+        }
+
+        if (!node->type) {
+            node->type = ctx->store->t_void_ptr;
+        }
+        
+        return node->type;
+    } 
+    else if (kind == INTRINSIC_FREE) {
+        // Check arguments for free
+        size_t arg_count = node->data.intrinsic.args ? node->data.intrinsic.args->count : 0;
+        for (size_t i = 0; i < arg_count; i++) {
+            AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
+            check_expression(ctx, scope, arg, NULL);
+        }
+        return ctx->store->t_void;
+    }
+    
+    return ctx->store->t_void;
+}
+
 // -----------------------------------------------------------------------------
 // Unary (Updated with Hint)
 // -----------------------------------------------------------------------------
+
 
 Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstUnaryExpr *unary = &expr->data.unary_expr;
@@ -764,6 +810,7 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                 }
                 
                 // If it's a dynamic slice (!size_known), it's evaluated at runtime.
+                member_expr->field_index = 1; // Index 1 is the 'len' in the { ptr, len } fat pointer struct
                 expr->type = ctx->store->t_i64;
                 return ctx->store->t_i64;
             } else {
@@ -924,6 +971,9 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
             break;
         case AST_CAST:
             result_type = check_cast(ctx, scope, expr);
+            break;
+        case AST_INTRINSIC:
+            result_type = check_intrinsic(ctx, scope, expr, expected_type);
             break;
         default: break;
     }

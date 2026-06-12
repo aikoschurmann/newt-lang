@@ -71,10 +71,9 @@ int main(int argc, char **argv) {
     }
     size_t src_len = strlen(src);
 
+    // Lexical Analysis
     // ---------------------------------------------------------
-    // PHASE 1: Lexical Analysis
-    // ---------------------------------------------------------
-    if (opts.verbose) printf("[1/4] Lexing...\n");
+    if (opts.verbose) printf("Lexing...\n");
     lexer = lexer_create(src, src_len, arena);
     if (!lexer) {
         fprintf(stderr, "Error: Failed to initialize lexer\n");
@@ -102,9 +101,9 @@ int main(int argc, char **argv) {
     }
 
     // ---------------------------------------------------------
-    // PHASE 2: Parsing
+    // Parsing
     // ---------------------------------------------------------
-    if (opts.verbose) printf("[2/4] Parsing...\n");
+    if (opts.verbose) printf("Parsing...\n");
     parser = parser_create(lexer->tokens, filename_interned, arena);
     if (!parser) {
         fprintf(stderr, "Error: Failed to initialize parser\n");
@@ -131,9 +130,9 @@ int main(int argc, char **argv) {
     }
 
     // ---------------------------------------------------------
-    // PHASE 3: Semantic Analysis (Type Checking)
+    // Semantic Analysis (Type Checking)
     // ---------------------------------------------------------
-    if (opts.verbose) printf("[3/4] Semantic Analysis...\n");
+    if (opts.verbose) printf("Semantic Analysis...\n");
     size_t mem_before_sema = arena_total_allocated(arena);
     double t3 = now_seconds();
 
@@ -165,9 +164,9 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    // PHASE 4: Code Generation
+    // Code Generation
     // ---------------------------------------------------------
-    if (opts.verbose) printf("[4/4] Code Generation...\n");
+    if (opts.verbose) printf("Code Generation...\n");
     double t5 = now_seconds();
     double t_run = 0;
     int program_exit_code = 0;

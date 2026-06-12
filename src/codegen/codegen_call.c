@@ -77,6 +77,7 @@ static LLVMValueRef codegen_intrinsic_print(CodegenContext *ctx, AstNode *arg, b
 }
 
 LLVMValueRef codegen_expr_call(CodegenContext *ctx, AstNode *expr) {
+    if (!expr->type) ICE("Call expression missing type.");
     AstCallExpr *call = &expr->data.call_expr;
 
     // Check for intrinsic
@@ -112,30 +113,54 @@ LLVMValueRef codegen_expr_call(CodegenContext *ctx, AstNode *expr) {
     LLVMValueRef callee = codegen_expr(ctx, call->callee);
     if (!callee) return NULL;
 
+    LLVMTypeRef func_type = get_llvm_function_type(ctx, call->callee->type);
+    size_t param_count = LLVMCountParamTypes(func_type);
+    LLVMTypeRef *param_types = malloc(sizeof(LLVMTypeRef) * param_count);
+    LLVMGetParamTypes(func_type, param_types);
+
     size_t arg_count = call->args ? call->args->count : 0;
     LLVMValueRef *args = NULL;
 
     if (arg_count > 0) {
         args = malloc(sizeof(LLVMValueRef) * arg_count);
 
-        LLVMTypeRef  func_type_pre  = get_llvm_function_type(ctx, call->callee->type);
-        LLVMTypeRef *param_types    = malloc(sizeof(LLVMTypeRef) * arg_count);
-        LLVMGetParamTypes(func_type_pre, param_types);
-
         for (size_t i = 0; i < arg_count; i++) {
             AstNode *arg_node = *(AstNode**)dynarray_get(call->args, i);
-            args[i] = codegen_expr(ctx, arg_node);
+            LLVMValueRef arg_val = codegen_expr(ctx, arg_node);
+            
+            // Implicit slice decay: If argument is Array but param is Slice (struct of ptr, len)
+            Type *param_type = call->callee->type->as.func.params[i];
+            if (arg_node->type->kind == TYPE_ARRAY && arg_node->type->as.array.size_known && param_type->kind == TYPE_ARRAY && !param_type->as.array.size_known) {
+                // Decay to fat pointer
+                LLVMTypeRef slice_ty = param_types[i];
+
+                // Get pointer to array
+                LLVMValueRef ptr = arg_val; 
+
+                // Get length
+                LLVMValueRef len = LLVMConstInt(LLVMInt64TypeInContext(ctx->context), arg_node->type->as.array.size, 0);
+
+                // Build the Slice Struct Mathematically (No alloca, No garbage!)
+                LLVMValueRef slice_val = LLVMGetUndef(slice_ty);
+
+                // Insert the Pointer at Index 0
+                slice_val = LLVMBuildInsertValue(ctx->builder, slice_val, ptr, 0, "slice_ptr");
+
+                // Insert the Length at Index 1
+                slice_val = LLVMBuildInsertValue(ctx->builder, slice_val, len, 1, "slice_len");
+
+                args[i] = slice_val;
+            } else {
+                args[i] = arg_val;
+            }
+            
             if (!args[i]) {
-                LLVMTypeRef fallback = (param_types[i])
-                                        ? param_types[i]
-                                        : LLVMInt32TypeInContext(ctx->context);
-                args[i] = LLVMConstNull(fallback);
+                ICE("Failed to generate code for call argument %zu", i);
             }
         }
-        free(param_types);
     }
-
-    LLVMTypeRef func_type = get_llvm_function_type(ctx, call->callee->type);
+    
+    free(param_types);
     LLVMTypeRef ret_ty    = LLVMGetReturnType(func_type);
     const char *call_name = (LLVMGetTypeKind(ret_ty) == LLVMVoidTypeKind) ? "" : "calltmp";
 

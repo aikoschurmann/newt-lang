@@ -88,6 +88,7 @@ typedef struct TypeStore {
 
     // Fast access to common primitives so we don't need to look them up constantly
     Type *t_void;
+    Type *t_void_ptr;
     Type *t_i32, *t_i64;
     Type *t_f32, *t_f64;
     Type *t_bool;

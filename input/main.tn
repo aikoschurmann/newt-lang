@@ -1,0 +1,41 @@
+import stdlib;
+
+struct Node {
+    val: i32;
+    next: *Node;
+}
+
+fn main() {
+    a: Allocator = get_c_allocator();
+    
+    // [10] -> [20] -> [30] -> null
+    print("Allocating nodes...\n");
+    
+    head: *Node = @alloc(Node, a, 1);
+    head.val = 10;
+    
+    second: *Node = @alloc(Node, a, 1);
+    second.val = 20;
+    head.next = second;
+    
+    third: *Node = @alloc(Node, a, 1);
+    third.val = 30;
+    second.next = third;
+    third.next = 0 as *Node; // null terminator
+    
+    print("Traversing heap list: ");
+    curr: *Node = head;
+    while curr != (0 as *Node) {
+        print(curr.val);
+        print(" -> ");
+        curr = curr.next;
+    }
+    print("null\n");
+    
+    print("Freeing nodes...\n");
+    @free(a, third);
+    @free(a, second);
+    @free(a, head);
+    
+    print("Done!\n");
+}
