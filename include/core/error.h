@@ -1,5 +1,7 @@
 #pragma once
 
+#pragma once
+
 #include <stdarg.h>
 #include <stdbool.h>
 
@@ -10,4 +12,4 @@
  */
 #define ICE(msg, ...) ice_impl(__FILE__, __LINE__, msg, ##__VA_ARGS__)
 
-void ice_impl(const char *file, int line, const char *fmt, ...);
+void ice_impl(const char *file, int line, const char *fmt, ...) __attribute__((noreturn));

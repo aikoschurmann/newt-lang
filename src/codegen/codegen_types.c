@@ -18,7 +18,7 @@ LLVMTypeRef get_llvm_function_type(CodegenContext *ctx, Type *t) {
 }
 
 LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
-    if (!t) return LLVMVoidTypeInContext(ctx->context);
+    if (!t) ICE("get_llvm_type: received NULL type.");
     switch (t->kind) {
         case TYPE_VOID: return LLVMVoidTypeInContext(ctx->context);
         case TYPE_PRIMITIVE:
@@ -31,7 +31,7 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
                 case PRIM_CHAR: return LLVMInt8TypeInContext(ctx->context);
                 case PRIM_VOID: return LLVMVoidTypeInContext(ctx->context);
                 case PRIM_STR:  return LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0);
-                default:        return LLVMInt32TypeInContext(ctx->context);
+                default:        ICE("get_llvm_type: unrecognized primitive kind %d", t->as.primitive);
             }
         case TYPE_POINTER:
         case TYPE_FUNCTION: // In LLVM 15+ functions are opaque pointers when used as values/struct fields.
@@ -78,6 +78,6 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
             return struct_ty;
         }
         default:
-            return LLVMInt32TypeInContext(ctx->context);
+            ICE("get_llvm_type: unrecognized type kind %d", t->kind);
     }
 }
