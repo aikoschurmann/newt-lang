@@ -282,7 +282,7 @@ void register_intrinsics(TypeStore *ts, Scope *global_scope, DenseArenaInterner 
     {
         Slice s = { .ptr = "print", .len = 5 };
         InternResult *res = intern(ids, &s, NULL);
-        Symbol *sym = scope_define_symbol(global_scope, res, ts->t_void, SYMBOL_VALUE_INTRINSIC);
+        Symbol *sym = scope_define_symbol(global_scope, res, ts->t_void, SYMBOL_VALUE_INTRINSIC, NULL, true, NULL);
         if (sym) sym->intrinsic_kind = INTRINSIC_PRINT;
     }
 
@@ -290,7 +290,7 @@ void register_intrinsics(TypeStore *ts, Scope *global_scope, DenseArenaInterner 
     {
         Slice s = { .ptr = "println", .len = 7 };
         InternResult *res = intern(ids, &s, NULL);
-        Symbol *sym = scope_define_symbol(global_scope, res, ts->t_void, SYMBOL_VALUE_INTRINSIC);
+        Symbol *sym = scope_define_symbol(global_scope, res, ts->t_void, SYMBOL_VALUE_INTRINSIC, NULL, true, NULL);
         if (sym) sym->intrinsic_kind = INTRINSIC_PRINT_NEWLINE; // Overloading println to print then newline
     }
 }

@@ -9,6 +9,7 @@
 // Forward declarations
 typedef struct Scope Scope;
 typedef struct Symbol Symbol;
+typedef struct AstNode AstNode;
 
 // Symbol kinds for better type safety and debugging
 typedef enum {
@@ -31,13 +32,18 @@ typedef enum {
     SYMBOL_FLAG_CONST = 1 << 0,          // Was 'int is_const'
     SYMBOL_FLAG_COMPUTED_VALUE = 1 << 1, // Was 'int has_const_value'
     SYMBOL_FLAG_USED = 1 << 2,
-    SYMBOL_FLAG_INITIALIZED = 1 << 3
+    SYMBOL_FLAG_INITIALIZED = 1 << 3,
+    SYMBOL_FLAG_COMPUTING = 1 << 4       // Recursion guard
 } SymbolFlags;
 
 typedef struct Symbol {
     InternResult *name_rec; 
     Type *type;
     Span span;
+    const char *filename; // Which module defined this
+    bool is_pub;         // Visibility
+
+    AstNode *decl_node; // AST node that defined this symbol
 
     SymbolValue kind;   // 4 bytes
     SymbolFlags flags;  // 4 bytes (Merged booleans here!)
@@ -81,8 +87,8 @@ typedef enum {
 Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind);
 
 // Symbol management
-Symbol *scope_define_symbol(Scope *scope, InternResult *name, Type *type, SymbolValue  kind);
-Symbol *scope_lookup_symbol(Scope *scope, InternResult *name);
+Symbol *scope_define_symbol(Scope *scope, InternResult *name, Type *type, SymbolValue kind, const char *filename, bool is_pub, AstNode *decl_node);
+Symbol *scope_lookup_symbol(Scope *scope, InternResult *name, const char *caller_filename);
 Symbol *scope_lookup_symbol_local(Scope *scope, InternResult *name);
 
 // Symbol modification

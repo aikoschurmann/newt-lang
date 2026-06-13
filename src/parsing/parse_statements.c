@@ -11,7 +11,7 @@
 
 /* Helper: create AST node or set OOM parse error */
 static AstNode *new_node_or_err(Parser *p, AstNodeType kind, ParseError *err, const char *oom_msg) {
-    AstNode *n = ast_create_node(kind, p->arena);
+    AstNode *n = ast_create_node(kind, p->arena, p->filename);
     if (!n) {
         if (err) create_parse_error(err, p, oom_msg, NULL);
     }
@@ -22,21 +22,45 @@ static AstNode *new_node_or_err(Parser *p, AstNodeType kind, ParseError *err, co
 
 
 static inline bool parse_int_lit(const char *s, size_t len, long long *out) {
-    uint64_t val = 0;
+    if (len == 0) return false;
+    
+    int base = 10;
+    size_t start = 0;
 
-    for (size_t i = 0; i < len; i++) {
-        unsigned d = (unsigned)(s[i] - '0');
-        if (d > 9) return false; // invalid char
-
-        // Check overflow before multiplying
-        if (val > (ULLONG_MAX - d) / 10)
-            return false; // overflow
-
-        val = val * 10 + d;
+    if (len > 2 && s[0] == '0') {
+        if (s[1] == 'x' || s[1] == 'X') {
+            base = 16;
+            start = 2;
+        } else if (s[1] == 'b' || s[1] == 'B') {
+            base = 2;
+            start = 2;
+        }
     }
 
-    if (val > LLONG_MAX)
-        return false; // doesn’t fit in signed 64-bit
+    uint64_t val = 0;
+    bool any_digits = false;
+
+    for (size_t i = start; i < len; i++) {
+        if (s[i] == '_') continue; // Support underscores
+
+        unsigned int d = 0;
+        char c = s[i];
+        if (c >= '0' && c <= '9') d = (unsigned int)(c - '0');
+        else if (c >= 'a' && c <= 'f') d = (unsigned int)(10 + (c - 'a'));
+        else if (c >= 'A' && c <= 'F') d = (unsigned int)(10 + (c - 'A'));
+        else return false; // invalid char
+
+        if (d >= (unsigned int)base) return false;
+
+        // Check overflow
+        if (val > (ULLONG_MAX - d) / (unsigned int)base) return false;
+
+        val = val * (unsigned int)base + d;
+        any_digits = true;
+    }
+
+    if (!any_digits) return false;
+    if (base == 10 && val > LLONG_MAX) return false;
 
     *out = (long long)val;
     return true;
@@ -421,7 +445,7 @@ AstNode *parse_variable_declaration(Parser *p, ParseError *err) {
 
 // <FunctionDeclaration> ::= FN IDENTIFIER LPAREN [ <ParamList> ] RPAREN [ ARROW <Type> ] <Block>
 AstNode *parse_function_declaration(Parser *p, ParseError *err) {
-    AstNode *func_decl = ast_create_node(AST_FUNCTION_DECLARATION, p->arena);
+    AstNode *func_decl = ast_create_node(AST_FUNCTION_DECLARATION, p->arena, p->filename);
     if (!func_decl) {
         if (err) create_parse_error(err, p, "out of memory creating function declaration node", NULL);  
         return NULL;
@@ -854,7 +878,28 @@ OpKind map_multiplicative_op(Token *tok) {
     }
 }
 AstNode *parse_multiplicative(Parser *p, ParseError *err) {
-    return parse_left_assoc_binary(p, err, parse_unary, map_multiplicative_op, "out of memory creating multiplicative node");
+    return parse_left_assoc_binary(p, err, parse_cast, map_multiplicative_op, "out of memory creating multiplicative node");
+}
+
+AstNode *parse_cast(Parser *p, ParseError *err) {
+    AstNode *expr = parse_unary(p, err);
+    if (!expr) return NULL;
+
+    while (current_token(p) && current_token(p)->type == TOK_AS) {
+        consume(p, TOK_AS);
+        AstNode *target_type_node = parse_type(p, err);
+        if (!target_type_node) return NULL;
+
+        AstNode *cast = new_node_or_err(p, AST_CAST, err, "out of memory creating cast node");
+        if (!cast) return NULL;
+
+        cast->data.cast_expr.expr = expr;
+        cast->data.cast_expr.target_type = NULL;
+        cast->data.cast_expr.target_type_node = target_type_node;
+        cast->span = span_join(&expr->span, &target_type_node->span);
+        expr = cast;
+    }
+    return expr;
 }
 
 OpKind map_unary_op(Token *tok) {
@@ -895,7 +940,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
     if (!primary) return NULL;
 
     Token *token = current_token(p);
-    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT || token->type == TOK_AS)) {
+    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT)) {
         if (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS) {
             Token *op_tok = token;
             AstNode *postfix = new_node_or_err(p, AST_UNARY_EXPR, err, "out of memory creating postfix node");
@@ -955,19 +1000,6 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
             member_access->data.member_expr.member = name_tok->record;
             member_access->span = span_join(&primary->span, &name_tok->span);
             primary = member_access;
-        } else if (token->type == TOK_AS) {
-            consume(p, TOK_AS);
-            AstNode *target_type_node = parse_type(p, err);
-            if (!target_type_node) return NULL;
-
-            AstNode *cast = new_node_or_err(p, AST_CAST, err, "out of memory creating cast node");
-            if (!cast) return NULL;
-
-            cast->data.cast_expr.expr = primary;
-            cast->data.cast_expr.target_type = NULL;
-            cast->data.cast_expr.target_type_node = target_type_node;
-            cast->span = span_join(&primary->span, &target_type_node->span);
-            primary = cast;
         }
 
         token = current_token(p);
@@ -1010,7 +1042,12 @@ int parse_argument_list(Parser *p, AstNode* call, ParseError *err) {
         tok = current_token(p);
         if (!tok) { if (err) create_parse_error(err, p, "unexpected end of input in argument list", NULL); return 0; }
         if (tok->type == TOK_RPAREN) break;
+        
         if (!consume(p, TOK_COMMA)) { if (err) create_parse_error(err, p, "expected a ',' or ')'", tok); return 0; }
+        
+        // Support trailing comma
+        tok = current_token(p);
+        if (tok && tok->type == TOK_RPAREN) break;
     }
 
     return 1;
@@ -1057,7 +1094,12 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
                     // Peek to see if this argument is a type
                     Token *peek_tok = current_token(p);
                     AstNode *arg = NULL;
-                    if (peek_tok && (peek_tok->type >= TOK_I32 && peek_tok->type <= TOK_VOID)) {
+                    
+                    // Special case: @alloc's first argument MUST be a type
+                    if (intrinsic->data.intrinsic.kind == INTRINSIC_ALLOC && intrinsic->data.intrinsic.args->count == 0) {
+                        arg = parse_type(p, err);
+                    } 
+                    else if (peek_tok && (peek_tok->type >= TOK_I32 && peek_tok->type <= TOK_VOID)) {
                          arg = parse_type(p, err);
                     } else {
                          arg = parse_expression(p, err);
@@ -1245,7 +1287,7 @@ AstNode *parse_initializer_list(Parser *p, ParseError *err) {
     }
     Span start_span = start_tok->span;
 
-    AstNode *init = ast_create_node(AST_INITIALIZER_LIST, p->arena);
+    AstNode *init = ast_create_node(AST_INITIALIZER_LIST, p->arena, p->filename);
     if (!init) {
         if (err) create_parse_error(err, p, "out of memory creating initializer node", NULL);
         return NULL;
@@ -1314,22 +1356,19 @@ AstNode *parse_initializer_list(Parser *p, ParseError *err) {
             /* consume comma */
             consume(p, TOK_COMMA);
 
-            /* now the NEXT token must be another element start (not '}' ). Trailing comma is disallowed. */
+            /* check for trailing comma */
             tok = current_token(p);
-            if (!tok) {
-                create_parse_error(err, p, "unexpected end of input after ',' in initializer list", NULL);
-                return NULL;
-            }
-            if (tok->type == TOK_RBRACE) {
-                /* trailing comma — treat as error */
-                err->use_prev_token = true;
-                create_parse_error(err, p, "trailing comma not allowed in initializer list", tok);
-                return NULL;
+            if (tok && tok->type == TOK_RBRACE) {
+                /* trailing comma: just consume '}' and finish */
+                Token *rbrace = consume(p, TOK_RBRACE);
+                init->span = span_join(&start_span, &rbrace->span);
+                return init;
             }
 
             /* otherwise continue to parse the next element */
             continue;
-        } else if (tok->type == TOK_RBRACE) {
+        }
+ else if (tok->type == TOK_RBRACE) {
             Token *rbrace = consume(p, TOK_RBRACE);
             /* final span covers from the original '{' to this '}' */
             init->span = span_join(&start_span, &rbrace->span);
@@ -1384,7 +1423,7 @@ int parse_parameter_list(Parser *p, AstNode *func_decl, ParseError *err) {
         Span start_span = tok->span;
 
         /* create and fill a new parameter node */
-        AstNode *param = ast_create_node(AST_PARAM, p->arena);
+        AstNode *param = ast_create_node(AST_PARAM, p->arena, p->filename);
         if (!param) {
             if (err) create_parse_error(err, p, "out of memory creating parameter node", NULL);
             return 0;
@@ -1429,6 +1468,10 @@ int parse_parameter_list(Parser *p, AstNode *func_decl, ParseError *err) {
             return 0;
         }
 
+        // Support trailing comma: if next is ')', we are done
+        tok = current_token(p);
+        if (tok && tok->type == TOK_RPAREN) break;
+
         /* loop to parse next parameter (tok will be refreshed at top) */
     }
 
@@ -1438,7 +1481,7 @@ int parse_parameter_list(Parser *p, AstNode *func_decl, ParseError *err) {
 
 // <Block> ::= '{' { <Statement> } '}'
 AstNode *parse_block(Parser *p, ParseError *err) {
-    AstNode *block = ast_create_node(AST_BLOCK, p->arena);
+    AstNode *block = ast_create_node(AST_BLOCK, p->arena, p->filename);
 
     if (!block) {
         if (err) create_parse_error(err, p, "out of memory creating block node", NULL);
@@ -1561,7 +1604,7 @@ AstNode *parse_if_statement(Parser *p, ParseError *err) {
     }
     Span start_span = if_tok->span;
 
-    AstNode *if_stmt = ast_create_node(AST_IF_STATEMENT, p->arena);
+    AstNode *if_stmt = ast_create_node(AST_IF_STATEMENT, p->arena, p->filename);
     if (!if_stmt) {
         if (err) create_parse_error(err, p, "out of memory creating if statement node", current_token(p));
         return NULL;
@@ -1648,7 +1691,7 @@ AstNode *parse_for_statement(Parser *p, ParseError *err) {
         return NULL; 
     }
 
-    AstNode *for_node = ast_create_node(AST_FOR_STATEMENT, p->arena);
+    AstNode *for_node = ast_create_node(AST_FOR_STATEMENT, p->arena, p->filename);
     // Initialize for_node->data.for_statement fields to NULL...
 
     if (!consume(p, TOK_LPAREN)) {

@@ -11,7 +11,7 @@ LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
 LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags --libs core analysis bitwriter target native executionengine mcjit orcjit)
 
 # Base flags
-CFLAGS_BASE := -Iinclude -Iinclude/cli -Iinclude/core -Iinclude/codegen -Iinclude/datastructures -Iinclude/lexing -Iinclude/parsing -Iinclude/sema -Iinclude/types -Iinclude/test $(LLVM_CFLAGS) -MMD -MP -g
+CFLAGS_BASE := -Iinclude -Iinclude/cli -Iinclude/core -Iinclude/codegen -Iinclude/datastructures -Iinclude/lexing -Iinclude/parsing -Iinclude/sema -Iinclude/types $(LLVM_CFLAGS) -MMD -MP -g
 LDFLAGS_BASE := -lm $(LLVM_LDFLAGS)
 
 # Release flags
@@ -81,8 +81,9 @@ asan:
 	@echo "Built ASAN binary: ./$(OUT_DIR)/$(NAME)-asan"
 
 # Test Runner
-TEST_SRC_FILES := $(wildcard test/*.c)
+TEST_SRC_FILES := $(shell find test -type f -name "*.c")
 TEST_OBJ_FILES := $(patsubst test/%.c,$(OBJ_DIR)/test/%.o,$(TEST_SRC_FILES))
+CFLAGS_TEST := $(CFLAGS_DEV) -Itest/harness -Itest/helpers
 
 $(OUT_DIR)/test_runner: $(COMMON_OBJ_FILES_DEV) $(TEST_OBJ_FILES)
 	@mkdir -p $(OUT_DIR)
@@ -92,7 +93,7 @@ $(OUT_DIR)/test_runner: $(COMMON_OBJ_FILES_DEV) $(TEST_OBJ_FILES)
 $(OBJ_DIR)/test/%.o: test/%.c
 	@mkdir -p $(dir $@)
 	@echo "  CC      $<"
-	$(Q)$(CC) $(CFLAGS_DEV) -c $< -o $@
+	$(Q)$(CC) $(CFLAGS_TEST) -c $< -o $@
 
 clean:
 	@echo "  CLEAN"

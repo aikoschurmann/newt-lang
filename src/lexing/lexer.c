@@ -161,13 +161,43 @@ static void *lexer_lex_identifier(Lexer *lexer, const char *start_ptr, const cha
 static TokenType lexer_lex_number(Lexer *lexer, const char *start_ptr, const char **out_end_ptr) {
     const char *p = start_ptr;
 
-    /* integer part */
-    while (p < lexer->end && isdigit(*p)) p++;
+    if (*p == '0') {
+        p++;
+        if (p < lexer->end && (*p == 'x' || *p == 'X')) {
+            p++;
+            while (p < lexer->end && (isxdigit((unsigned char)*p) || *p == '_')) p++;
+            *out_end_ptr = p;
+            return TOK_INT_LIT;
+        } else if (p < lexer->end && (*p == 'b' || *p == 'B')) {
+            p++;
+            while (p < lexer->end && (*p == '0' || *p == '1' || *p == '_')) p++;
+            *out_end_ptr = p;
+            return TOK_INT_LIT;
+        }
+        // Fallthrough for decimal starting with 0
+    }
+
+    while (p < lexer->end && (isdigit((unsigned char)*p) || *p == '_')) p++;
 
     /* fractional part */
-    if (p < lexer->end && *p == '.' && (p + 1) < lexer->end && isdigit(*(p + 1))) {
-        p++; /* consume '.' */
-        while (p < lexer->end && isdigit(*p)) p++;
+    if (p < lexer->end && *p == '.') {
+        const char *next = p + 1;
+        if (next < lexer->end && isdigit((unsigned char)*next)) {
+             p++; /* consume '.' */
+             while (p < lexer->end && (isdigit((unsigned char)*p) || *p == '_')) p++;
+        } else {
+             // 10. (might be a member access on an integer literal if supported, or just 10.0)
+             // For now, if '.' is followed by non-digit, we stop.
+             *out_end_ptr = p;
+             return TOK_INT_LIT;
+        }
+        
+        /* exponent part */
+        if (p < lexer->end && (*p == 'e' || *p == 'E')) {
+            p++;
+            if (p < lexer->end && (*p == '+' || *p == '-')) p++;
+            while (p < lexer->end && (isdigit((unsigned char)*p) || *p == '_')) p++;
+        }
         *out_end_ptr = p;
         return TOK_FLOAT_LIT;
     }
@@ -281,6 +311,16 @@ static Slice unescape_string_into_arena(const Slice raw, Arena *arena) {
 }
 
 /* Create and initialize a new Lexer */
+void lexer_populate_default_keywords(DenseArenaInterner *keywords) {
+    for (size_t i = 0; KEYWORDS[i].word; i++) {
+        Slice slice = {
+            .ptr = (char*)KEYWORDS[i].word,
+            .len = strlen(KEYWORDS[i].word)
+        };
+        intern(keywords, &slice, (void*)(uintptr_t)KEYWORDS[i].type);
+    }
+}
+
 Lexer* lexer_create(const char *source, size_t source_len, Arena *arena) {
     if (!source || !arena) return NULL;
 
@@ -291,13 +331,7 @@ Lexer* lexer_create(const char *source, size_t source_len, Arena *arena) {
     if (!keywords || !identifiers || !strings) return NULL;
 
     /* Pre-intern keywords with TokenType as metadata */
-    for (size_t i = 0; KEYWORDS[i].word; i++) {
-        Slice slice = {
-            .ptr = (char*)KEYWORDS[i].word,
-            .len = strlen(KEYWORDS[i].word)
-        };
-        intern(keywords, &slice, (void*)(uintptr_t)KEYWORDS[i].type);
-    }
+    lexer_populate_default_keywords(keywords);
 
     return lexer_create_ex(source, source_len, arena, keywords, identifiers, strings);
 }

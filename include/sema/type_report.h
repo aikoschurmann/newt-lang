@@ -39,7 +39,8 @@ typedef enum {
     TE_ARG_COUNT_MISMATCH,  
 
     TE_NOT_CONST,          
-    TE_NOT_LVALUE          
+    TE_NOT_LVALUE,
+    TE_RECURSIVE_CONST          
 } TypeErrorKind;
 
 typedef struct {

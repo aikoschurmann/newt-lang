@@ -52,7 +52,7 @@ static void patch_inferred_array_sizes(TypeCheckContext *ctx, AstNode *type_ast,
         );
 
         if (!type_ast->data.ast_type.u.array.size_expr && concrete_type->as.array.size_known) {
-            AstNode *size_lit = ast_create_node(AST_LITERAL, ctx->store->arena);
+            AstNode *size_lit = ast_create_node(AST_LITERAL, ctx->store->arena, ctx->filename);
             if (size_lit) {
                 size_lit->node_type = AST_LITERAL;
                 size_lit->span = type_ast->span;
@@ -83,7 +83,7 @@ Type *resolve_ast_type(TypeCheckContext *ctx, Scope *scope, AstNode *node) {
                 if (prim) return prim;
                 
                 if (scope) {
-                    Symbol *sym = scope_lookup_symbol(scope, name_res);
+                    Symbol *sym = scope_lookup_symbol(scope, name_res, ctx->filename);
                     if (sym) {
                         if (sym->kind == SYMBOL_VALUE_TYPE) return sym->type;
                     }
@@ -200,6 +200,37 @@ static void resolve_function_decl(TypeCheckContext *ctx, Scope *scope, AstNode *
     free(param_types);
 }
 
+static bool check_struct_cycle(TypeCheckContext *ctx, Type *t, DynArray *path) {
+    if (!t || t->kind != TYPE_STRUCT) return false;
+
+    // Check if current type is already in the recursion path
+    for (size_t i = 0; i < path->count; i++) {
+        if (*(Type**)dynarray_get(path, i) == t) return true;
+    }
+
+    dynarray_push_value(path, &t);
+
+    for (size_t i = 0; i < t->as.struct_type.field_count; i++) {
+        Type *ft = t->as.struct_type.fields[i].type;
+        if (!ft) continue;
+
+        // Only value-type structs can cause cycles that affect layout
+        if (ft->kind == TYPE_STRUCT) {
+            if (check_struct_cycle(ctx, ft, path)) return true;
+        } else if (ft->kind == TYPE_ARRAY) {
+            // Arrays of structs also count as value-contained
+            Type *base = ft->as.array.base;
+            while (base && base->kind == TYPE_ARRAY) base = base->as.array.base;
+            if (base && base->kind == TYPE_STRUCT) {
+                if (check_struct_cycle(ctx, base, path)) return true;
+            }
+        }
+    }
+
+    dynarray_pop(path);
+    return false;
+}
+
 void resolve_program_structs(TypeCheckContext *ctx, Scope *global_scope) {
     if (!ctx || !ctx->program) return;
     AstProgram *program = &ctx->program->data.program;
@@ -209,7 +240,9 @@ void resolve_program_structs(TypeCheckContext *ctx, Scope *global_scope) {
     for (size_t i = 0; i < program->decls->count; i++) {
         AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
         if (!decl || decl->node_type != AST_STRUCT_DECLARATION) continue;
-        
+
+        ctx->filename = decl->filename;
+
         AstStructDeclaration *struct_decl = &decl->data.struct_declaration;
         if (!struct_decl->intern_result) continue;
 
@@ -217,30 +250,71 @@ void resolve_program_structs(TypeCheckContext *ctx, Scope *global_scope) {
         struct_type->kind = TYPE_STRUCT;
         struct_type->as.struct_type.name = struct_decl->intern_result;
         struct_type->as.struct_type.field_count = struct_decl->fields ? struct_decl->fields->count : 0;
-        struct_type->as.struct_type.fields = NULL; // Fill in Pass 2
-        
-        // Don't intern incomplete structs yet, we need to mutate them
-        decl->type = struct_type;
+        struct_type->as.struct_type.fields = NULL; 
 
-        define_symbol_or_error(ctx, global_scope, struct_decl->intern_result, decl->type, SYMBOL_VALUE_TYPE, decl->span);
+        decl->type = struct_type;
+        define_symbol_or_error(ctx, global_scope, struct_decl->intern_result, decl->type, SYMBOL_VALUE_TYPE, decl->span, struct_decl->is_pub, decl->filename, decl);
     }
 
     // Pass 2: Resolve struct fields
     for (size_t i = 0; i < program->decls->count; i++) {
         AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
         if (!decl || decl->node_type != AST_STRUCT_DECLARATION) continue;
-        
-        AstStructDeclaration *struct_decl = &decl->data.struct_declaration;
-        if (!struct_decl->fields || struct_decl->fields->count == 0) continue;
 
-        Type *struct_type = decl->type; 
-        
+        ctx->filename = decl->filename;
+
+        AstStructDeclaration *struct_decl = &decl->data.struct_declaration;
+        Type *struct_type = decl->type;
+        if (!struct_type || !struct_decl->fields) continue;
+
         struct_type->as.struct_type.fields = arena_alloc(ctx->store->arena, sizeof(StructField) * struct_type->as.struct_type.field_count);
-        
+
         for (size_t j = 0; j < struct_type->as.struct_type.field_count; j++) {
             AstFieldDecl *fdecl = (AstFieldDecl*)dynarray_get(struct_decl->fields, j);
             struct_type->as.struct_type.fields[j].name = fdecl->name;
             struct_type->as.struct_type.fields[j].type = resolve_ast_type(ctx, global_scope, fdecl->type);
+        }
+    }
+
+    // Pass 3: Cycle Detection
+    DynArray path;
+    dynarray_init(&path, sizeof(Type*));
+    for (size_t i = 0; i < program->decls->count; i++) {
+        AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
+        if (!decl || decl->node_type != AST_STRUCT_DECLARATION) continue;
+
+        ctx->filename = decl->filename;
+
+        path.count = 0;
+        if (check_struct_cycle(ctx, decl->type, &path)) {
+            TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = decl->span, .filename = ctx->filename };
+            err.as.name.name = "Recursive struct definition (infinite size)";
+            dynarray_push_value(ctx->errors, &err);
+        }
+    }
+    dynarray_free(&path);
+}
+
+void resolve_program_globals(TypeCheckContext *ctx, Scope *global_scope) {
+    if (!ctx || !ctx->program) return;
+    AstProgram *program = &ctx->program->data.program;
+    if (!program->decls) return;
+
+    for (size_t i = 0; i < program->decls->count; i++) {
+        AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
+        if (!decl || decl->node_type != AST_VARIABLE_DECLARATION) continue;
+
+        ctx->filename = decl->filename;
+
+        AstVariableDeclaration *var_decl = &decl->data.variable_declaration;
+        Type *var_type = resolve_ast_type(ctx, global_scope, var_decl->type);
+        if (!var_type) continue;
+        
+        decl->type = var_type;
+        if (var_decl->intern_result) {
+            define_symbol_or_error(ctx, global_scope, var_decl->intern_result, var_type, SYMBOL_VARIABLE, decl->span, var_decl->is_pub, decl->filename, decl);
+            Symbol *sym = scope_lookup_symbol_local(global_scope, var_decl->intern_result);
+            if (sym && var_decl->is_const) sym->flags |= SYMBOL_FLAG_CONST;
         }
     }
 }
@@ -254,10 +328,11 @@ void resolve_program_functions(TypeCheckContext *ctx, Scope *global_scope) {
         AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
         if (!decl) continue;
         if (decl->node_type == AST_FUNCTION_DECLARATION) {
+             ctx->filename = decl->filename;
              resolve_function_decl(ctx, global_scope, decl);
              AstFunctionDeclaration *func = &decl->data.function_declaration;
              if (func->intern_result && decl->type) {
-                 define_symbol_or_error(ctx, global_scope, func->intern_result, decl->type, SYMBOL_VALUE_FUNCTION, decl->span);
+                 define_symbol_or_error(ctx, global_scope, func->intern_result, decl->type, SYMBOL_VALUE_FUNCTION, decl->span, func->is_pub, decl->filename, decl);
              }
         }
     }
@@ -317,10 +392,33 @@ static bool is_type_complete(Type *t) {
 
 void check_variable_declaration(TypeCheckContext *ctx, Scope *scope, AstNode *var_node) {
     if (var_node->node_type != AST_VARIABLE_DECLARATION) return;
+    
+    const char *old_filename = ctx->filename;
+    ctx->filename = var_node->filename;
+
     AstVariableDeclaration *var_decl = &var_node->data.variable_declaration;
 
-    Type *var_type = resolve_ast_type(ctx, scope, var_decl->type);
-    if (!var_type) return; 
+    Symbol *existing = scope_lookup_symbol_local(scope, var_decl->intern_result);
+
+    // If already fully computed, skip (prevents redundant work in multi-pass)
+    if (existing && (existing->flags & SYMBOL_FLAG_COMPUTED_VALUE)) {
+        ctx->filename = old_filename;
+        return; 
+    }
+    
+    // Cycle detection for constants
+    if (existing && (existing->flags & SYMBOL_FLAG_COMPUTING)) {
+        TypeError err = { .kind = TE_RECURSIVE_CONST, .span = var_node->span, .filename = ctx->filename };
+        dynarray_push_value(ctx->errors, &err);
+        ctx->filename = old_filename;
+        return;
+    }
+
+    Type *var_type = existing ? existing->type : resolve_ast_type(ctx, scope, var_decl->type);
+    if (!var_type) {
+        ctx->filename = old_filename;
+        return;
+    }
 
     // Forbid 'void' type for variables
     if (type_is_void(var_type)) {
@@ -331,6 +429,7 @@ void check_variable_declaration(TypeCheckContext *ctx, Scope *scope, AstNode *va
             .as.name.name = "Variable cannot have type 'void'" 
         };
         dynarray_push_value(ctx->errors, &err);
+        ctx->filename = old_filename;
         return;
     }
 
@@ -348,26 +447,41 @@ void check_variable_declaration(TypeCheckContext *ctx, Scope *scope, AstNode *va
     }
 
     var_node->type = var_type;
-    
-    Symbol *sym = NULL;
-    if (var_decl->intern_result) {
-        define_symbol_or_error(ctx, scope, var_decl->intern_result, var_type, SYMBOL_VARIABLE, var_node->span);
-        sym = scope_lookup_symbol(scope, var_decl->intern_result);
+
+    bool is_global = (scope->depth == 0);
+
+    if (is_global) {
+        // Global: Symbol MUST be defined before checking initializer to allow recursion
+        if (!existing || existing->decl_node != var_node) {
+            define_symbol_or_error(ctx, scope, var_decl->intern_result, var_type, SYMBOL_VARIABLE, var_node->span, var_decl->is_pub, var_node->filename, var_node);
+            if (!existing) existing = scope_lookup_symbol_local(scope, var_decl->intern_result);
+        }
+
+        if (existing) {
+            existing->flags |= SYMBOL_FLAG_COMPUTING;
+            check_initializer(ctx, scope, var_node, var_decl->initializer, var_type, existing);
+            existing->flags &= ~SYMBOL_FLAG_COMPUTING;
+        }
+    } else {
+        // Local: Check initializer FIRST to catch self-initialization (x = x) as TE_UNDECLARED
+        check_initializer(ctx, scope, var_node, var_decl->initializer, var_type, NULL);
+        define_symbol_or_error(ctx, scope, var_decl->intern_result, var_type, SYMBOL_VARIABLE, var_node->span, var_decl->is_pub, var_node->filename, var_node);
+        existing = scope_lookup_symbol_local(scope, var_decl->intern_result);
     }
 
-    check_initializer(ctx, scope, var_node, var_decl->initializer, var_type, sym);
-
-    if (sym && var_decl->is_const && var_decl->initializer && var_decl->initializer->is_const_expr) {
-        sym->flags |= SYMBOL_FLAG_CONST | SYMBOL_FLAG_COMPUTED_VALUE;
+    if (existing && var_decl->is_const && var_decl->initializer && var_decl->initializer->is_const_expr) {
+        existing->flags |= SYMBOL_FLAG_CONST | SYMBOL_FLAG_COMPUTED_VALUE;
         ConstValue *cv = &var_decl->initializer->const_value;
         switch (cv->type) {
-            case INT_LITERAL:   sym->value.int_val = cv->value.int_val; break;
-            case FLOAT_LITERAL: sym->value.float_val = cv->value.float_val; break;
-            case BOOL_LITERAL:  sym->value.bool_val = (bool)cv->value.bool_val; break;
-            case CHAR_LITERAL:  sym->value.int_val = (int64_t)cv->value.char_val; break;
+            case INT_LITERAL:   existing->value.int_val = cv->value.int_val; break;
+            case FLOAT_LITERAL: existing->value.float_val = cv->value.float_val; break;
+            case BOOL_LITERAL:  existing->value.bool_val = (bool)cv->value.bool_val; break;
+            case CHAR_LITERAL:  existing->value.int_val = (int64_t)cv->value.char_val; break;
             default: break;
         }
     }
+    
+    ctx->filename = old_filename;
 }
 
 static void check_block(TypeCheckContext *ctx, Scope *parent, AstNode *block_node, Type *return_type, bool create_new_scope) {
@@ -453,6 +567,9 @@ static void check_statement(TypeCheckContext *ctx, Scope *scope, AstNode *stmt, 
 }
 
 static void check_function(TypeCheckContext *ctx, Scope *parent_scope, AstNode *func_node) {
+    const char *old_filename = ctx->filename;
+    ctx->filename = func_node->filename;
+
     AstFunctionDeclaration *decl = &func_node->data.function_declaration;
     Type *func_type = func_node->type;
 
@@ -462,13 +579,15 @@ static void check_function(TypeCheckContext *ctx, Scope *parent_scope, AstNode *
             AstNode *param = *(AstNode**)dynarray_get(decl->params, i);
             if (param->data.param.name_idx != -1) {
                 InternResult *name_rec = interner_get_result(ctx->identifiers, param->data.param.name_idx);
-                define_symbol_or_error(ctx, fn_scope, name_rec, param->type, SYMBOL_VARIABLE, param->span);
+                define_symbol_or_error(ctx, fn_scope, name_rec, param->type, SYMBOL_VARIABLE, param->span, false, param->filename, param);
             }
         }
     }
     if (decl->body) {
         check_block(ctx, fn_scope, decl->body, func_type->as.func.return_type, false);
     }
+
+    ctx->filename = old_filename;
 }
 
 void typecheck_program(TypeCheckContext *ctx) {
@@ -478,14 +597,19 @@ void typecheck_program(TypeCheckContext *ctx) {
     Scope *global_scope = scope_create(scope_arena, NULL, global_count, SCOPE_IDENTIFIERS);  
     
     register_intrinsics(ctx->store, global_scope, ctx->identifiers);
+
+    // Pass 1: Define Struct names and Globals
     resolve_program_structs(ctx, global_scope);
+    resolve_program_globals(ctx, global_scope);
     resolve_program_functions(ctx, global_scope);
 
+    // Pass 2: Resolve bodies and initializer values
     AstProgram *program = &ctx->program->data.program;
     if (!program->decls) return;
 
     for (size_t i = 0; i < program->decls->count; i++) {
         AstNode *decl = *(AstNode**)dynarray_get(program->decls, i);
+        ctx->filename = decl->filename;
         switch (decl->node_type) {
             case AST_VARIABLE_DECLARATION: check_variable_declaration(ctx, global_scope, decl); break;
             case AST_FUNCTION_DECLARATION: check_function(ctx, global_scope, decl); break;

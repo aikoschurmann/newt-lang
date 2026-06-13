@@ -155,6 +155,9 @@ void print_type_error(TypeError *err) {
         case TE_NOT_LVALUE:
             fprintf(stderr, "Expression is not an lvalue.\n");
             break;
+        case TE_RECURSIVE_CONST:
+            fprintf(stderr, "Recursive constant definition detected (cycle).\n");
+            break;
         default:
             fprintf(stderr, "Unknown Semantic Error.\n");
             break;

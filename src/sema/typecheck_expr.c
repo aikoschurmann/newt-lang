@@ -186,11 +186,11 @@ Type* check_literal(TypeCheckContext *ctx, AstNode *expr, Type *expected_type) {
     expr->type = type;
     return type;
 }
-
 Type* check_identifier(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstIdentifier *ident = &expr->data.identifier;
-    Symbol *sym = scope_lookup_symbol(scope, ident->intern_result);
-    
+
+    Symbol *sym = scope_lookup_symbol(scope, ident->intern_result, ctx->filename);
+
     if (!sym) {
         const char *name_str = "<unknown>";
         if (ident->intern_result && ident->intern_result->key) {
@@ -199,6 +199,17 @@ Type* check_identifier(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         TypeError err = { .kind = TE_UNDECLARED, .span = expr->span, .filename = ctx->filename, .as.name.name = name_str };
         dynarray_push_value(ctx->errors, &err);
         return NULL;
+    }
+
+    // Demand-driven resolution for global constants
+    if ((sym->flags & SYMBOL_FLAG_CONST) && !(sym->flags & SYMBOL_FLAG_COMPUTED_VALUE)) {
+        if (sym->decl_node) {
+            // Recurse into variable declaration check
+            // Note: global scope is used here because constants are top-level
+            Scope *global_scope = scope;
+            while (global_scope->parent) global_scope = global_scope->parent;
+            check_variable_declaration(ctx, global_scope, sym->decl_node);
+        }
     }
 
     expr->type = sym->type;
@@ -228,7 +239,7 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     
     // Check if the callee is an intrinsic
     if (call->callee->node_type == AST_IDENTIFIER) {
-        Symbol *sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result);
+        Symbol *sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result, ctx->filename);
         if (sym && sym->kind == SYMBOL_VALUE_INTRINSIC) {
             expr->type = ctx->store->t_void; // Intrinsics currently return void
             
@@ -538,7 +549,7 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstStructLiteral *lit = &expr->data.struct_literal;
 
-    Symbol *sym = scope_lookup_symbol(scope, lit->intern_result);
+    Symbol *sym = scope_lookup_symbol(scope, lit->intern_result, ctx->filename);
     if (!sym || sym->kind != SYMBOL_VALUE_TYPE || sym->type->kind != TYPE_STRUCT) {
         const char *name_str = "<unknown>";
         if (lit->intern_result && lit->intern_result->key) name_str = ((Slice*)lit->intern_result->key)->ptr;
@@ -548,6 +559,7 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
     }
 
     Type *struct_type = sym->type;
+    expr->type = struct_type; // Ensure type is set early
     size_t defined_field_count = struct_type->as.struct_type.field_count;
     size_t lit_field_count = lit->fields ? lit->fields->count : 0;
 
@@ -564,6 +576,7 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
         for (size_t j = 0; j < defined_field_count; j++) {
             if (struct_type->as.struct_type.fields[j].name == init->name) {
                 def_field = &struct_type->as.struct_type.fields[j];
+                init->field_index = (int)j; // Store the resolved index for Codegen
                 break;
             }
         }
@@ -594,46 +607,53 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
 static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstNode *node = expr;
     IntrinsicKind kind = node->data.intrinsic.kind;
+    size_t arg_count = node->data.intrinsic.args ? node->data.intrinsic.args->count : 0;
 
     if (kind == INTRINSIC_ALLOC) {
-        // 1. Check all arguments first to ensure they are valid
-        size_t arg_count = node->data.intrinsic.args ? node->data.intrinsic.args->count : 0;
+        if (arg_count < 2 || arg_count > 3) {
+            TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = node->span, .filename = ctx->filename };
+            err.as.arg_count.expected = 2; // simplified
+            err.as.arg_count.actual = arg_count;
+            dynarray_push_value(ctx->errors, &err);
+            return ctx->store->t_void_ptr;
+        }
+
+        // 1. Check all arguments
         for (size_t i = 0; i < arg_count; i++) {
             AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
             check_expression(ctx, scope, arg, NULL);
         }
 
-        // The first argument of @alloc is the type T to allocate.
-        // It could be an AST_TYPE node or an expression evaluating to a type.
-        if (arg_count > 0) {
-            AstNode *type_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
-            Type *allocated_type = NULL;
-            
-            if (type_arg->node_type == AST_TYPE) {
-                allocated_type = resolve_ast_type(ctx, scope, type_arg);
-                type_arg->type = allocated_type;
-            } else {
-                allocated_type = type_arg->type;
-            }
-
-            if (allocated_type) {
-                Type proto = { .kind = TYPE_POINTER, .as.ptr.base = allocated_type };
-                InternResult *res = intern_type(ctx->store, &proto);
-                if (res && res->key) {
-                    node->type = (Type*)((Slice*)res->key)->ptr;
-                }
-            }
-        }
-
-        if (!node->type) {
-            node->type = ctx->store->t_void_ptr;
-        }
+        // The first argument (if 3 args) or the inferred type (if 2 args)
+        AstNode *type_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
+        Type *allocated_type = NULL;
         
+        if (type_arg->node_type == AST_TYPE) {
+            allocated_type = resolve_ast_type(ctx, scope, type_arg);
+            type_arg->type = allocated_type;
+        } else if (arg_count == 3) {
+             // If 3 args, 1st is type. If it's not a type node, it's an error.
+             TypeError err = { .kind = TE_TYPE_MISMATCH, .span = type_arg->span, .filename = ctx->filename };
+             dynarray_push_value(ctx->errors, &err);
+        }
+
+        if (allocated_type) {
+            Type proto = { .kind = TYPE_POINTER, .as.ptr.base = allocated_type };
+            InternResult *res = intern_type(ctx->store, &proto);
+            if (res && res->key) node->type = (Type*)((Slice*)res->key)->ptr;
+        }
+
+        if (!node->type) node->type = ctx->store->t_void_ptr;
         return node->type;
     } 
     else if (kind == INTRINSIC_FREE) {
-        // Check arguments for free
-        size_t arg_count = node->data.intrinsic.args ? node->data.intrinsic.args->count : 0;
+        if (arg_count < 2 || arg_count > 3) {
+            TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = node->span, .filename = ctx->filename };
+            err.as.arg_count.expected = 2;
+            err.as.arg_count.actual = arg_count;
+            dynarray_push_value(ctx->errors, &err);
+            return ctx->store->t_void;
+        }
         for (size_t i = 0; i < arg_count; i++) {
             AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
             check_expression(ctx, scope, arg, NULL);
@@ -892,11 +912,16 @@ Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     else if (src_type->kind == TYPE_POINTER && cast->target_type->kind == TYPE_POINTER) {
         valid = true;
     }
-    // 4. Pointer <-> Integer (Bit reinterpretation)
+    // 4. Pointer <-> i64 (Bit reinterpretation)
     else if ((src_type->kind == TYPE_POINTER && type_is_integer(cast->target_type)) ||
              (type_is_integer(src_type) && cast->target_type->kind == TYPE_POINTER)) {
-        valid = true; 
+
+        Type *int_type = (src_type->kind == TYPE_POINTER) ? cast->target_type : src_type;
+        if (int_type->as.primitive == PRIM_I64) {
+            valid = true;
+        }
     }
+
     // 5. Array -> Slice (Decay)
     else if (src_type->kind == TYPE_ARRAY && cast->target_type->kind == TYPE_ARRAY && !cast->target_type->as.array.size_known) {
         if (src_type->as.array.base == cast->target_type->as.array.base) {

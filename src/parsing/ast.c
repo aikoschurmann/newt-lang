@@ -107,13 +107,14 @@ static void print_escaped_char(char c) {
     printf("'");
 }
 
-AstNode *ast_create_node(AstNodeType type, Arena *arena) {
+AstNode *ast_create_node(AstNodeType type, Arena *arena, const char *filename) {
     if (!arena) return NULL;
 
     AstNode *node = (AstNode*)arena_calloc(arena, sizeof(AstNode));
     if (!node) return NULL;
 
     node->node_type = type;
+    node->filename = filename;
     /* arena_calloc zeroed the rest (span fields = 0, union memory = 0,
        is_const_expr = 0, const_value = zero). */
     return node;

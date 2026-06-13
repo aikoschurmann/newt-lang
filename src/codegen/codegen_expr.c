@@ -129,6 +129,10 @@ LLVMValueRef codegen_expr_member(CodegenContext *ctx, AstNode *expr) {
 
     Type *underlying = target_type->kind == TYPE_POINTER ? target_type->as.ptr.base : target_type;
     LLVMValueRef field_ptr = LLVMBuildStructGEP2(ctx->builder, get_llvm_type(ctx, underlying), target_lvalue, mem_expr->field_index, "field_gep");
+    
+    // Arrays must not be loaded; we work with their addresses to allow decay/indexing
+    if (expr->type && expr->type->kind == TYPE_ARRAY && expr->type->as.array.size_known) return field_ptr;
+
     LLVMTypeRef field_ty = get_llvm_type(ctx, expr->type);
     return LLVMGetTypeKind(field_ty) == LLVMVoidTypeKind ? field_ptr : LLVMBuildLoad2(ctx->builder, field_ty, field_ptr, "field_val");
 }
@@ -141,7 +145,7 @@ LLVMValueRef codegen_expr_struct_literal(CodegenContext *ctx, AstNode *expr) {
     LLVMValueRef alloca = LLVMBuildAlloca(ctx->builder, struct_ty, "struct_lit");
     for (size_t i = 0; i < (lit->fields ? lit->fields->count : 0); i++) {
         AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, i);
-        LLVMBuildStore(ctx->builder, codegen_expr(ctx, init->expr), LLVMBuildStructGEP2(ctx->builder, struct_ty, alloca, (unsigned int)i, "field_ptr"));
+        LLVMBuildStore(ctx->builder, codegen_expr(ctx, init->expr), LLVMBuildStructGEP2(ctx->builder, struct_ty, alloca, (unsigned int)init->field_index, "field_ptr"));
     }
     return LLVMBuildLoad2(ctx->builder, struct_ty, alloca, "struct_val");
 }

@@ -24,7 +24,7 @@ ModuleLoader* module_loader_create(Arena *arena, Options *opts,
     loader->identifiers = identifiers;
     loader->strings = strings;
     loader->visited_modules = hashmap_create(16);
-    loader->merged_program = ast_create_node(AST_PROGRAM, arena);
+    loader->merged_program = ast_create_node(AST_PROGRAM, arena, NULL);
     loader->merged_program->data.program.decls = arena_alloc(arena, sizeof(DynArray));
     dynarray_init_in_arena(loader->merged_program->data.program.decls, arena, sizeof(AstNode*), 32);
     return loader;
@@ -72,14 +72,27 @@ int load_module_recursive(ModuleLoader *loader, const char *path) {
 
     // 5. Recursive Loading and Merging
     AstProgram *module_prog = &module_ast->data.program;
+    
+    // Get directory of current module for relative resolution
+    char dir[256] = {0};
+    const char *last_slash = strrchr(path, '/');
+    if (last_slash) {
+        size_t len = (size_t)(last_slash - path);
+        if (len < sizeof(dir)) {
+            memcpy(dir, path, len);
+            dir[len] = '/';
+            dir[len+1] = '\0';
+        }
+    }
+
     for (size_t i = 0; i < module_prog->decls->count; i++) {
         AstNode *decl = *(AstNode**)dynarray_get(module_prog->decls, i);
         
         if (decl->node_type == AST_IMPORT_DECLARATION) {
-            // Simple path resolution: input/<module_name>.tn
+            // Path resolution: <current_dir>/<module_name>.tn
             Slice *mod_name = (Slice*)decl->data.import_declaration.module_name->key;
-            char mod_path[256];
-            snprintf(mod_path, sizeof(mod_path), "input/%.*s.tn", (int)mod_name->len, mod_name->ptr);
+            char mod_path[512];
+            snprintf(mod_path, sizeof(mod_path), "%s%.*s.tn", dir, (int)mod_name->len, mod_name->ptr);
             
             // Intern the path string so it survives recursion and can be used as hash key
             char *interned_path = arena_alloc(loader->arena, strlen(mod_path) + 1);

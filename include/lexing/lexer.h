@@ -45,6 +45,7 @@ typedef struct Lexer {
 /* Create a lexer that will operate on `source` (not copied). `arena` is used
  * for lexer allocations and must remain valid for the lifetime of the lexer.
  * Returns NULL on allocation failure. */
+void lexer_populate_default_keywords(DenseArenaInterner *keywords);
 Lexer* lexer_create(const char *source, size_t source_len, Arena *arena);
 
 /* Create a lexer with existing interners for module systems. */

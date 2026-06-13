@@ -136,14 +136,38 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
             case OP_MUL:  return is_float ? LLVMBuildFMul(ctx->builder, L, R, "multmp") : LLVMBuildMul(ctx->builder, L, R, "multmp");
             case OP_DIV:  return is_float ? LLVMBuildFDiv(ctx->builder, L, R, "divtmp") : LLVMBuildSDiv(ctx->builder, L, R, "divtmp");
             case OP_MOD:  return is_float ? LLVMBuildFRem(ctx->builder, L, R, "modtmp") : LLVMBuildSRem(ctx->builder, L, R, "modtmp");
-            case OP_EQ:   return is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOEQ, L, R, "eqtmp")  : LLVMBuildICmp(ctx->builder, LLVMIntEQ,  L, R, "eqtmp");
-            case OP_NEQ:  return is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealONE, L, R, "neqtmp") : LLVMBuildICmp(ctx->builder, LLVMIntNE,  L, R, "neqtmp");
-            case OP_LT:   return is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOLT, L, R, "lttmp") : LLVMBuildICmp(ctx->builder, LLVMIntSLT, L, R, "lttmp");
-            case OP_GT:   return is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOGT, L, R, "gttmp") : LLVMBuildICmp(ctx->builder, LLVMIntSGT, L, R, "gttmp");
-            case OP_LE:   return is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOLE, L, R, "letmp") : LLVMBuildICmp(ctx->builder, LLVMIntSLE, L, R, "letmp");
-            case OP_GE:   return is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOGE, L, R, "getmp") : LLVMBuildICmp(ctx->builder, LLVMIntSGE, L, R, "getmp");
-            case OP_AND:  return LLVMBuildAnd(ctx->builder, L, R, "andtmp");
-            case OP_OR:   return LLVMBuildOr(ctx->builder, L, R, "ortmp");
+            case OP_EQ: {
+                LLVMValueRef res = is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOEQ, L, R, "eqtmp")  : LLVMBuildICmp(ctx->builder, LLVMIntEQ,  L, R, "eqtmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_NEQ: {
+                LLVMValueRef res = is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealONE, L, R, "neqtmp") : LLVMBuildICmp(ctx->builder, LLVMIntNE,  L, R, "neqtmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_LT: {
+                LLVMValueRef res = is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOLT, L, R, "lttmp") : LLVMBuildICmp(ctx->builder, LLVMIntSLT, L, R, "lttmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_GT: {
+                LLVMValueRef res = is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOGT, L, R, "gttmp") : LLVMBuildICmp(ctx->builder, LLVMIntSGT, L, R, "gttmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_LE: {
+                LLVMValueRef res = is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOLE, L, R, "letmp") : LLVMBuildICmp(ctx->builder, LLVMIntSLE, L, R, "letmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_GE: {
+                LLVMValueRef res = is_float ? LLVMBuildFCmp(ctx->builder, LLVMRealOGE, L, R, "getmp") : LLVMBuildICmp(ctx->builder, LLVMIntSGE, L, R, "getmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_AND: {
+                LLVMValueRef res = LLVMBuildAnd(ctx->builder, L, R, "andtmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
+            case OP_OR: {
+                LLVMValueRef res = LLVMBuildOr(ctx->builder, L, R, "ortmp");
+                return LLVMBuildZExt(ctx->builder, res, get_llvm_type(ctx, expr->type), "bool_zext");
+            }
             default: {
                 LLVMTypeRef ty = get_llvm_type(ctx, expr->type);
                 if (LLVMGetTypeKind(ty) != LLVMVoidTypeKind) return LLVMConstNull(ty);

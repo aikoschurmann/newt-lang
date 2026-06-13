@@ -25,6 +25,7 @@ AstNode *parse_equality(Parser *p, ParseError *err);
 AstNode *parse_relational(Parser *p, ParseError *err);
 AstNode *parse_additive(Parser *p, ParseError *err);
 AstNode *parse_multiplicative(Parser *p, ParseError *err);
+AstNode *parse_cast(Parser *p, ParseError *err);
 AstNode *parse_unary(Parser *p, ParseError *err);
 AstNode *parse_postfix(Parser *p, ParseError *err);
 AstNode *parse_primary(Parser *p, ParseError *err);

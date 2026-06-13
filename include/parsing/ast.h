@@ -178,6 +178,7 @@ typedef struct { AstNode *target; InternResult *member; int field_index; } AstMe
 typedef struct {
     InternResult *name; // The field name
     AstNode *expr;      // Field initialization expression
+    int field_index;    // Resolved at Sema, used by Codegen
 } AstFieldInit;
 
 typedef struct {
@@ -229,6 +230,7 @@ typedef struct {
 struct AstNode {
     AstNodeType node_type;
     Span span;
+    const char *filename; // Originating module
     Type *type;  // semantic type information
 
     /* constant folding / evaluation helper: inline value to avoid small allocations */
@@ -276,7 +278,7 @@ struct AstNode {
 /* ----------------------- Helpers & prototypes ----------------------- */
 
 /* AST helper prototypes (implementations are up to you) */
-AstNode *ast_create_node(AstNodeType type, Arena *arena);
+AstNode *ast_create_node(AstNodeType type, Arena *arena, const char *filename);
 void print_ast(AstNode *node, int depth, DenseArenaInterner *keywords, DenseArenaInterner *identifiers, DenseArenaInterner *strings);
 void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInterner *keywords, DenseArenaInterner *identifiers, DenseArenaInterner *strings);
 int is_lvalue_node(AstNode *node);

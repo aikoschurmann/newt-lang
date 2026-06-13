@@ -20,7 +20,7 @@ Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind)
     return scope;
 }
 
-Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolValue kind) {
+Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolValue kind, const char *filename, bool is_pub, AstNode *decl_node) {
     if (!scope || !rec || !type) {
         return NULL;
     }
@@ -60,6 +60,9 @@ Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolV
     symbol->type = type;
     symbol->kind = kind;
     symbol->flags = SYMBOL_FLAG_NONE;
+    symbol->filename = filename;
+    symbol->is_pub = is_pub;
+    symbol->decl_node = decl_node;
 
     scope->symbols[rec->entry->dense_index] = symbol;
     scope->symbol_count++;
@@ -73,23 +76,32 @@ Symbol *scope_lookup_symbol_local(Scope *scope, InternResult *rec) {
     return scope->symbols[rec->entry->dense_index];
 }
 
-Symbol *scope_lookup_symbol(Scope *scope, InternResult *rec) {
+Symbol *scope_lookup_symbol(Scope *scope, InternResult *rec, const char *caller_filename) {
     if (!scope || !rec) return NULL;
     
     // Detect if the key is a Keyword (meta != 0) or Identifier (meta == 0)
-    // Note: TOK_FN is 0, but 'fn' is not a type, so it won't be looked up as a type.
     bool is_keyword_key = (rec->entry->meta != NULL);
 
     Scope *current = scope;
     while (current) {
-        // Only lookup if the scope kind matches the key kind
-        // SCOPE_IDENTIFIERS (0) matches meta==NULL (0)
-        // SCOPE_KEYWORDS (1) matches meta!=NULL (1)
         bool is_keyword_scope = (current->kind == SCOPE_KEYWORDS);
         
         if (is_keyword_key == is_keyword_scope) {
              Symbol *symbol = scope_lookup_symbol_local(current, rec);
-             if (symbol) return symbol;
+             if (symbol) {
+                 // Visibility check:
+                 // 1. Local symbols (depth > 0) are always visible in their children
+                 // 2. Global symbols (depth == 0) must be 'pub' OR from the same file
+                 if (current->depth == 0 && !symbol->is_pub && symbol->filename && caller_filename) {
+                     if (strcmp(symbol->filename, caller_filename) != 0) {
+                         // Symbol is private and from another module
+                         // Continue searching (to allow shadowing or just fail later)
+                         current = current->parent;
+                         continue;
+                     }
+                 }
+                 return symbol;
+             }
         }
         
         current = current->parent;
@@ -124,7 +136,7 @@ size_t scope_get_symbol_count(Scope *scope){
 void scope_set_flags(Scope *scope, InternResult *rec, int flags){
     if (!scope || !rec) return;
 
-    Symbol *symbol = scope_lookup_symbol(scope, rec);
+    Symbol *symbol = scope_lookup_symbol(scope, rec, NULL);
     if (symbol) {
         symbol->flags |= flags;
     }
