@@ -819,7 +819,7 @@ static void resolve_imports(TypeCheckContext *ctx, CompilationUnit *unit) {
 
         if (!target) {
             if (ctx->loader->opts->verbose) {
-                fprintf(stderr, "DEBUG: Failed to resolve import '%s' in %s\n", logical_path_str, unit->absolute_path);
+                fprintf(stderr, "Failed to resolve import '%s' in %s\n", logical_path_str, unit->absolute_path);
             }
             TypeError err = { .kind = TE_UNDECLARED, .span = decl->span, .filename = unit->absolute_path };
             err.as.name.name = "Module not found";

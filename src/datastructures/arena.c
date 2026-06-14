@@ -134,7 +134,7 @@ size_t arena_block_count(const Arena *arena) {
     return count;
 }
 
-int arena_total_allocated(const Arena *arena) {
+size_t arena_total_allocated(const Arena *arena) {
     if (!arena) return 0;
     size_t total = 0;
     for (const ArenaBlock *b = arena->blocks; b; b = b->next)

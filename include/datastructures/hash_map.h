@@ -15,7 +15,9 @@ static inline size_t ptr_hash(void *key) {
     size_t k = (size_t)key;
     return (k >> 4) ^ (k >> 9);
 }
-static inline int ptr_cmp(void *a, void *b) { return (a == b) ? 0 : 1; }
+static inline int ptr_cmp(void *a, void *b) {
+    return (a > b) - (a < b);
+}
 
 typedef struct {
     void *key;

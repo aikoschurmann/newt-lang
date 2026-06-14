@@ -33,6 +33,12 @@ typedef struct Arena {
 
 Arena *arena_create(size_t initial_capacity);
 void arena_destroy(Arena *arena);
+void arena_reset(Arena *arena);
 void *arena_alloc(Arena *arena, size_t size);
 void *arena_calloc(Arena *arena, size_t size);
-int arena_total_allocated(const Arena *arena);
+
+/* Debug / Metrics helpers */
+size_t arena_bytes_used(const Arena *arena);
+size_t arena_bytes_capacity(const Arena *arena);
+size_t arena_block_count(const Arena *arena);
+size_t arena_total_allocated(const Arena *arena);
