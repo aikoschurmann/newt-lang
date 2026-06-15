@@ -33,9 +33,9 @@ Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolV
     // Type is optional (e.g. during Pass 1 name registration)
     // We used to restrict this to modules, but now allow it for all kinds.
 
-    if (rec->entry->dense_index >= scope->capacity) {
+    if ((size_t)rec->entry->dense_index >= scope->capacity) {
         size_t new_cap = scope->capacity ? scope->capacity * 2 : 16;
-        while (new_cap <= rec->entry->dense_index) {
+        while (new_cap <= (size_t)rec->entry->dense_index) {
             new_cap *= 2;
         }
         
@@ -79,7 +79,7 @@ Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolV
 
 Symbol *scope_lookup_symbol_local(Scope *scope, InternResult *rec) {
     if (!scope || !rec) return NULL;
-    if (rec->entry->dense_index >= scope->capacity) return NULL;
+    if ((size_t)rec->entry->dense_index >= scope->capacity) return NULL;
     return scope->symbols[rec->entry->dense_index];
 }
 

@@ -336,7 +336,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
             primary = postfix;
 
         } else if (token->type == TOK_LBRACKET) {
-            Token *lbr = consume(p, TOK_LBRACKET);
+            consume(p, TOK_LBRACKET);
             AstNode *index = parse_expression(p, err);
             if (!index) return NULL;
             Token *rbr = consume(p, TOK_RBRACKET);
@@ -351,7 +351,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
             primary = array_access;
 
         } else if (token->type == TOK_LPAREN) {
-            Token *lparen = consume(p, TOK_LPAREN);
+            consume(p, TOK_LPAREN);
 
             AstNode *func_call = new_node_or_err(p, AST_CALL_EXPR, err, "out of memory creating function call node");
             if (!func_call) return NULL;

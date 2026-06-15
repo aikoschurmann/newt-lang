@@ -205,7 +205,7 @@ void codegen_statement(CodegenContext *ctx, AstNode *stmt) {
                 ctx->deferred_actions->count--; // Pop before execution
                 codegen_statement(ctx, body);
                 
-                LLVMBasicBlockRef current_block = LLVMGetInsertBlock(ctx->builder);
+                current_block = LLVMGetInsertBlock(ctx->builder);
                 if (current_block && LLVMGetBasicBlockTerminator(current_block)) {
                     // A defer terminated the block (e.g. it had a return).
                     // The recursive call will have executed the rest of the stack.
@@ -236,15 +236,15 @@ void codegen_statement(CodegenContext *ctx, AstNode *stmt) {
                     ctx->deferred_actions->count--;
                     codegen_statement(ctx, body);
                     
-                    LLVMBasicBlockRef current_block = LLVMGetInsertBlock(ctx->builder);
-                    if (current_block && LLVMGetBasicBlockTerminator(current_block)) {
+                    LLVMBasicBlockRef stmt_block = LLVMGetInsertBlock(ctx->builder);
+                    if (stmt_block && LLVMGetBasicBlockTerminator(stmt_block)) {
                         break;
                     }
                 }
                 // Restore count so outer scopes still run their defers upon normal exit
                 ctx->deferred_actions->count = original_count;
                 
-                LLVMBasicBlockRef current_block = LLVMGetInsertBlock(ctx->builder);
+                current_block = LLVMGetInsertBlock(ctx->builder);
                 if (current_block && !LLVMGetBasicBlockTerminator(current_block)) {
                     LLVMBuildBr(ctx->builder, ctx->loop_end_bb);
                 }
@@ -260,14 +260,14 @@ void codegen_statement(CodegenContext *ctx, AstNode *stmt) {
                     ctx->deferred_actions->count--;
                     codegen_statement(ctx, body);
                     
-                    LLVMBasicBlockRef current_block = LLVMGetInsertBlock(ctx->builder);
-                    if (current_block && LLVMGetBasicBlockTerminator(current_block)) {
+                    LLVMBasicBlockRef stmt_block = LLVMGetInsertBlock(ctx->builder);
+                    if (stmt_block && LLVMGetBasicBlockTerminator(stmt_block)) {
                         break;
                     }
                 }
                 ctx->deferred_actions->count = original_count;
 
-                LLVMBasicBlockRef current_block = LLVMGetInsertBlock(ctx->builder);
+                current_block = LLVMGetInsertBlock(ctx->builder);
                 if (current_block && !LLVMGetBasicBlockTerminator(current_block)) {
                     LLVMBuildBr(ctx->builder, ctx->loop_cond_bb);
                 }

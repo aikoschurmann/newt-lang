@@ -1,4 +1,5 @@
 #include "codegen_internal.h"
+#include "codegen_utils.h"
 
 LLVMValueRef create_entry_block_alloca(CodegenContext *ctx, LLVMTypeRef ty, const char *name) {
     LLVMBasicBlockRef current_block = LLVMGetInsertBlock(ctx->builder);

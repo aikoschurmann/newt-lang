@@ -58,10 +58,6 @@ static inline char lexer_peek(const Lexer *lexer) {
     return lexer->cur < lexer->end ? *lexer->cur : '\0';
 }
 
-static inline char lexer_peek_next(const Lexer *lexer) {
-    return (lexer->cur + 1 < lexer->end) ? *(lexer->cur + 1) : '\0';
-}
-
 /* Advance returns the char consumed (like before) and updates pos/cur/line/col */
 static inline char lexer_advance(Lexer *lexer) {
     if (lexer->cur >= lexer->end) return '\0';
@@ -82,9 +78,6 @@ static inline bool is_alpha(char c) {
 }
 static inline bool is_digit(char c) {
     return isdigit((unsigned char)c);
-}
-static inline bool is_alnum(char c) {
-    return is_alpha(c) || is_digit(c);
 }
 
 /* Create slice from current lexer position using pointer arithmetic */

@@ -15,16 +15,6 @@
 // SECTION 1: CONSTANT FOLDING HELPERS
 // =============================================================================
 
-static Type* unite_numeric_types(TypeCheckContext *ctx, Type *a, Type *b) {
-    TypeStore *s = ctx->store;
-    if (a == b) return a;
-    if (a == s->t_f64 || b == s->t_f64) return s->t_f64;
-    if (a == s->t_f32 || b == s->t_f32) return s->t_f32;
-    if (a == s->t_i64 || b == s->t_i64) return s->t_i64;
-    if (a == s->t_i32 || b == s->t_i32) return s->t_i32;
-    return NULL;
-}
-
 static void fold_unary_op(AstNode *node, OpKind op, AstNode *operand) {
     if (!operand->is_foldable_const) return;
     LiteralType type = operand->const_value.type;

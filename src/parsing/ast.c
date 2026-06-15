@@ -187,7 +187,7 @@ static int ancestor_is_last[MAX_TREE_DEPTH];
 
 static void print_tree_prefix_tracked(int depth, int is_last) {
     if (depth == 0) return;
-    
+
     for (int i = 0; i < depth - 1; ++i) {
         if (ancestor_is_last[i]) {
             printf("    ");  // 4 spaces for levels where ancestor was last
@@ -195,25 +195,7 @@ static void print_tree_prefix_tracked(int depth, int is_last) {
             printf("│   ");  // tree continuation
         }
     }
-    
-    if (is_last) {
-        printf("└── ");
-    } else {
-        printf("├── ");
-    }
-}
 
-static void print_tree_prefix_with_parent_info(int depth, int is_last, int *parent_is_last, int parent_depth) {
-    if (depth == 0) return;
-    
-    for (int i = 0; i < depth - 1; ++i) {
-        if (i < parent_depth && parent_is_last && parent_is_last[i]) {
-            printf("    ");  // 4 spaces for levels where parent was last
-        } else {
-            printf("│   ");  // tree continuation
-        }
-    }
-    
     if (is_last) {
         printf("└── ");
     } else {
@@ -225,14 +207,9 @@ static void print_tree_prefix(int depth, int is_last) {
     print_tree_prefix_tracked(depth, is_last);
 }
 
-static void print_tree_simple(int depth) {
-    for (int i = 0; i < depth; ++i) {
-        printf("│   ");
-    }
-}
-
 /* Print a string representation of an operator */
 static const char *op_to_string(OpKind op) {
+
     switch (op) {
         case OP_ADD: return "+";
         case OP_SUB: return "-";
