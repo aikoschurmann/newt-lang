@@ -6,6 +6,7 @@
 #include "sema/intrinsics.h"
 #include "parsing/ast.h" 
 #include "datastructures/scope.h"
+#include "core/error.h"
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -132,7 +133,15 @@ static Type* resolve_literal_type(TypeCheckContext *ctx, LiteralType lit_kind, T
         case BOOL_LITERAL:   return s->t_bool;
         case CHAR_LITERAL:   return s->t_char;
         case STRING_LITERAL: return s->t_str;
-        default: return NULL;
+        case NULL_LITERAL: {
+            // Null adaptation: Null can be any pointer type
+            if (expected && expected->kind == TYPE_POINTER) return expected;
+            // Default to a generic void pointer or similar if possible, 
+            // but for now we'll just return expected if it's a pointer, or 
+            // maybe a generic pointer type if we have one.
+            return s->t_void_ptr; // Assuming t_void_ptr exists or similar
+        }
+        default: ICE("Unknown LiteralType in resolve_literal_type: %d", lit_kind);
     }
 }
 
@@ -872,7 +881,7 @@ Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expe
             }
             if (unary->expr->is_foldable_const) fold_unary_op(expr, unary->op, unary->expr);
             return operand_type;
-        case OP_ADRESS: 
+        case OP_ADDRESS: 
             if (!is_lvalue_node(unary->expr)) { 
                 TypeError err = { .kind = TE_NOT_LVALUE, .span = unary->expr->span, .filename = ctx->filename };
                 dynarray_push_value(ctx->errors, &err);

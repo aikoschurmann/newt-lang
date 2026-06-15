@@ -41,7 +41,7 @@ bool type_can_implicit_cast(Type *target, Type *source) {
     if (target->kind == TYPE_POINTER && source->kind == TYPE_POINTER) {
         // Safe: T* -> *void (Implicitly discarding type info)
         if (type_is_void(target->as.ptr.base)) return true;
-
+        
         // Tightened: T[N]* -> T[]* only if T is identical
         Type *sb = source->as.ptr.base;
         Type *tb = target->as.ptr.base;
@@ -167,6 +167,13 @@ Type* coerce_or_error(TypeCheckContext *ctx, AstNode *node, Type *expected) {
     if (!node || !expected) return node ? node->type : NULL;
     Type *actual = node->type;
     if (actual == expected) return actual;
+
+    // Special case for NULL literal: allow void* -> T*
+    bool is_null_literal = (node->node_type == AST_LITERAL && node->data.literal.type == NULL_LITERAL);
+    if (is_null_literal && expected->kind == TYPE_POINTER) {
+        insert_cast(ctx, node, expected);
+        return expected;
+    }
 
     // Check bidirectional compatibility rules (e.g. array-to-slice decay)
     if (type_can_implicit_cast(expected, actual)) {

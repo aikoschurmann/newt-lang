@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "type_print.h"
+#include "core/error.h"
 #include <stdio.h>
 
 /* Helper functions to convert enums to strings */
@@ -55,7 +56,8 @@ static const char *literal_type_to_string(LiteralType type) {
         case BOOL_LITERAL: return "Boolean";
         case STRING_LITERAL: return "String";
         case CHAR_LITERAL: return "Character";
-        default: return "UnknownLiteral";
+        case NULL_LITERAL: return "Null";
+        default: ICE("Unknown LiteralType: %d", type);
     }
 }
 
@@ -229,7 +231,7 @@ static const char *op_to_string(OpKind op) {
         case OP_PLUS_EQ: return "+=";
         case OP_MINUS_EQ: return "-=";
         case OP_DEREF: return "*";
-        case OP_ADRESS: return "&";
+        case OP_ADDRESS: return "&";
         case OP_POST_INC: return "++";
         case OP_POST_DEC: return "--";
         case OP_PRE_INC: return "++";
@@ -276,9 +278,17 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
             case BOOL_LITERAL:
                 printf("%s", node->const_value.value.bool_val ? "true" : "false");
                 break;
-            default:
-                printf("...");
+            case STRING_LITERAL:
+                printf("string");
                 break;
+            case CHAR_LITERAL:
+                printf("char");
+                break;
+            case NULL_LITERAL:
+                printf("null");
+                break;
+            default:
+                ICE("Unknown constant LiteralType: %d", node->const_value.type);
         }
         printf(")\033[0m");
     } else if (node->is_llvm_const_safe) {

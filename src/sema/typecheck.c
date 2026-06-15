@@ -4,6 +4,7 @@
 #include "sema/symbol_utils.h"
 #include "sema/typecheck_expr.h"
 #include "core/utils.h"
+#include "core/error.h"
 #include "datastructures/dynamic_array.h"
 #include "codegen/codegen_utils.h"
 #include <string.h>
@@ -308,21 +309,20 @@ Type *resolve_ast_type(TypeCheckContext *ctx, Scope *scope, AstNode *node) {
              size_t count = params ? params->count : 0;
              Type **param_types = NULL;
              if (count > 0) {
-                 if (count <= 64) param_types = ALLOCA(sizeof(Type*) * count);
-                 else param_types = xmalloc(sizeof(Type*) * count);
+                 param_types = xmalloc(sizeof(Type*) * count);
              }
              for (size_t i = 0; i < count; i++) {
                  AstNode *p_node = FAST_GET(params, i);
                  Type *pt = resolve_ast_type(ctx, scope, p_node);
                  if (!pt) {
-                     if (count > 64) free(param_types);
+                     free(param_types);
                      return NULL; 
                  }
                  param_types[i] = pt;
              }
              Type proto = { .kind = TYPE_FUNCTION, .as.func.return_type = ret, .as.func.param_count = count, .as.func.params = param_types };
              InternResult *res = intern_type(store, &proto);
-             if (count > 64) free(param_types);
+             free(param_types);
              return res ? (Type*)((Slice*)res->key)->ptr : NULL;
         }
     }
@@ -761,7 +761,12 @@ void check_variable_declaration(TypeCheckContext *ctx, Scope *scope, AstNode *va
             case FLOAT_LITERAL: my_sym->value.float_val = cv->value.float_val; break;
             case BOOL_LITERAL:  my_sym->value.bool_val = (bool)cv->value.bool_val; break;
             case CHAR_LITERAL:  my_sym->value.int_val = (int64_t)cv->value.char_val; break;
-            default: break;
+            case STRING_LITERAL:
+            case NULL_LITERAL:
+                // Not supported as simple numeric constants in symbols for now
+                break;
+            default:
+                ICE("Unsupported LiteralType for constant symbol value: %d", cv->type);
         }
     }
     
@@ -888,17 +893,22 @@ static void resolve_imports(TypeCheckContext *ctx, CompilationUnit *unit) {
         // Use the resolved logical path from the loading phase
         const char *logical_path_str = import->resolved_logical_path;
         if (!logical_path_str) {
-             // Fallback to rebuilding from module_path if needed (mostly for main module or simple cases)
-             char rebuilt[512] = {0};
+             // Fallback to rebuilding from module_path if needed
+             size_t total_len = 0;
+             for (size_t j = 0; j < import->module_path->count; j++) {
+                InternResult *part = *(InternResult**)dynarray_get(import->module_path, j);
+                Slice *s = (Slice*)part->key;
+                total_len += s->len + (j > 0 ? 1 : 0);
+             }
+
+             char *rebuilt = arena_alloc(ctx->store->arena, total_len + 1);
              size_t r_len = 0;
              for (size_t j = 0; j < import->module_path->count; j++) {
                 InternResult *part = *(InternResult**)dynarray_get(import->module_path, j);
                 Slice *s = (Slice*)part->key;
-                if (r_len + s->len + 1 < sizeof(rebuilt)) {
-                    if (j > 0) rebuilt[r_len++] = '.';
-                    memcpy(rebuilt + r_len, s->ptr, s->len);
-                    r_len += s->len;
-                }
+                if (j > 0) rebuilt[r_len++] = '.';
+                memcpy(rebuilt + r_len, s->ptr, s->len);
+                r_len += s->len;
              }
              rebuilt[r_len] = '\0';
              logical_path_str = rebuilt;

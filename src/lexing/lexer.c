@@ -50,6 +50,7 @@ static const struct {
     {"void", TOK_VOID},
     {"true", TOK_TRUE},
     {"false", TOK_FALSE},
+    {"null", TOK_NULL},
     {NULL, TOK_UNKNOWN}  /* sentinel */
 };
 

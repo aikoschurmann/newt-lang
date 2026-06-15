@@ -65,7 +65,7 @@ typedef enum {
     OP_EQ, OP_NEQ, OP_LT, OP_GT, OP_LE, OP_GE,
     OP_AND, OP_OR, OP_NOT,
     OP_ASSIGN, OP_PLUS_EQ, OP_MINUS_EQ, OP_MUL_EQ, OP_DIV_EQ, OP_MOD_EQ,
-    OP_DEREF, OP_ADRESS,
+    OP_DEREF, OP_ADDRESS,
     OP_POST_INC, OP_POST_DEC, OP_PRE_INC, OP_PRE_DEC
 } OpKind;
 
@@ -75,8 +75,7 @@ typedef enum {
     BOOL_LITERAL,
     STRING_LITERAL,
     CHAR_LITERAL,
-    NULL_LITERAL,
-    LIT_UNKNOWN /* used for error handling, not a real literal type */
+    NULL_LITERAL
 } LiteralType;
 
 typedef struct {

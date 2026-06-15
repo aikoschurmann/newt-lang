@@ -4,6 +4,7 @@
 #include "dynamic_array.h"
 #include "lexer.h"
 #include "ast.h"
+#include "core/error.h"
 #include <limits.h>
 #include <math.h>
 #include <string.h>
@@ -291,7 +292,7 @@ static OpKind map_unary_op(Token *tok) {
         case TOK_MINUS: return OP_SUB;
         case TOK_BANG: return OP_NOT;
         case TOK_STAR: return OP_DEREF;
-        case TOK_AMP: return OP_ADRESS;
+        case TOK_AMP: return OP_ADDRESS;
         case TOK_PLUSPLUS: return OP_PRE_INC;
         case TOK_MINUSMINUS: return OP_PRE_DEC;
         default: return OP_NULL;
@@ -459,12 +460,14 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
 
 static LiteralType get_literal_type(TokenType type) {
     switch (type) {
-        case TOK_INT_LIT: return INT_LITERAL;
-        case TOK_FLOAT_LIT: return FLOAT_LITERAL;
-        case TOK_TRUE: case TOK_FALSE: return BOOL_LITERAL;
+        case TOK_INT_LIT:    return INT_LITERAL;
+        case TOK_FLOAT_LIT:  return FLOAT_LITERAL;
+        case TOK_TRUE:
+        case TOK_FALSE:      return BOOL_LITERAL;
         case TOK_STRING_LIT: return STRING_LITERAL;
-        case TOK_CHAR_LIT: return CHAR_LITERAL;
-        default: return LIT_UNKNOWN;
+        case TOK_CHAR_LIT:   return CHAR_LITERAL;
+        case TOK_NULL:       return NULL_LITERAL;
+        default: ICE("Unexpected token type %d in get_literal_type", (int)type);
     }
 }
 
@@ -562,12 +565,12 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
             return intrinsic;
         }
 
-        case TOK_INT_LIT: case TOK_FLOAT_LIT: case TOK_TRUE: case TOK_FALSE: case TOK_CHAR_LIT: case TOK_STRING_LIT: {
+        case TOK_INT_LIT: case TOK_FLOAT_LIT: case TOK_TRUE: case TOK_FALSE: case TOK_CHAR_LIT: case TOK_STRING_LIT: case TOK_NULL: {
             AstNode *literal = new_node_or_err(p, AST_LITERAL, err, "out of memory creating literal node");
             if (!literal) return NULL;
 
             literal->data.literal.type = get_literal_type(token->type);
-            
+
             switch (token->type) {
                 case TOK_INT_LIT: {
                     long long v;
@@ -601,10 +604,13 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
                 case TOK_STRING_LIT:
                     literal->data.literal.value.string_val = token->record;
                     break;
+                case TOK_NULL:
+                    literal->data.literal.value.int_val = 0;
+                    break;
                 default:
                     literal->data.literal.value.int_val = 0;
                     break;
-            }   
+            }
 
             literal->is_foldable_const = 0;
             literal->is_llvm_const_safe = 0;

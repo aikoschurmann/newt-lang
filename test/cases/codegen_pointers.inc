@@ -31,3 +31,10 @@ CODEGEN_EXIT("null_pointer_init",
     "    if (p == 0 as *i32) { return 1; }\n"
     "    return 0;\n"
     "}", 1)
+
+CODEGEN_EXIT("null_keyword_init",
+    "fn main() -> i32 {\n"
+    "    p: *i32 = null;\n"
+    "    if (p == null) { return 1; }\n"
+    "    return 0;\n"
+    "}", 1)

@@ -82,6 +82,7 @@ typedef enum {
     TOK_CHAR_LIT,     // 'a'
     TOK_TRUE,
     TOK_FALSE,
+    TOK_NULL,
 
     // other
     TOK_IDENTIFIER,
@@ -99,7 +100,7 @@ typedef enum {
 // ------------------------------
 typedef struct {
     TokenType type;   // what kind of token
-    Slice slice;      // points into source buffer
+    Slice slice;     /**< Non-owning view into the source buffer. Pointer remains valid as long as the source buffer (usually arena-owned) is alive. */
     Span span;        // position in source for error reporting
     InternResult *record;
 } Token;

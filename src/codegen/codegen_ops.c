@@ -196,7 +196,7 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
     if (expr->node_type == AST_UNARY_EXPR) {
         AstUnaryExpr *ue = &expr->data.unary_expr;
 
-        if (ue->op == OP_ADRESS) {
+        if (ue->op == OP_ADDRESS) {
             return codegen_lvalue(ctx, ue->expr);
         } else if (ue->op == OP_DEREF) {
             LLVMValueRef ptr = codegen_expr(ctx, ue->expr);
