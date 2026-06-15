@@ -68,6 +68,7 @@ struct Type {
             InternResult *name;
             StructField *fields;
             size_t field_count;
+            HashMap *field_map;
         } struct_type;
 
         // TYPE_ENUM

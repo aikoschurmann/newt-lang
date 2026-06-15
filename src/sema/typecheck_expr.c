@@ -698,21 +698,20 @@ static Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *
     // Check each field against its definition
     for (size_t i = 0; i < lit_field_count; i++) {
         AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, i);
-        StructField *def_field = NULL;
-        for (size_t j = 0; j < defined_field_count; j++) {
-            if (struct_type->as.struct_type.fields[j].name == init->name) {
-                def_field = &struct_type->as.struct_type.fields[j];
-                break;
-            }
-        }
-
-        if (!def_field) {
+        
+        // O(1) Lookup
+        void *field_idx_ptr = hashmap_get(struct_type->as.struct_type.field_map, init->name->key, ptr_hash, ptr_cmp);
+        if (!field_idx_ptr) {
             const char *name_str = "<unknown>";
             if (init->name && init->name->key) name_str = ((Slice*)init->name->key)->ptr;
             TypeError err = { .kind = TE_FIELD_ACCESS, .span = init->expr->span, .filename = ctx->filename, .as.name.name = name_str };
             dynarray_push_value(ctx->errors, &err);
             return NULL;
         }
+        
+        // Retrieve field index by subtracting the 1-based offset
+        size_t field_idx = (size_t)(uintptr_t)field_idx_ptr - 1;
+        StructField *def_field = &struct_type->as.struct_type.fields[field_idx];
 
         if (check_expression(ctx, scope, init->expr, def_field->type)) {
             coerce_or_error(ctx, init->expr, def_field->type);

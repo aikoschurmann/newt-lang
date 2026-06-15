@@ -501,11 +501,17 @@ static void resolve_program_structs(TypeCheckContext *ctx, Scope *global_scope) 
         if (struct_type->as.struct_type.fields) continue;
 
         struct_type->as.struct_type.fields = arena_alloc(ctx->store->arena, sizeof(StructField) * struct_type->as.struct_type.field_count);
+        
+        // Initialize field_map
+        struct_type->as.struct_type.field_map = hashmap_create(struct_type->as.struct_type.field_count);
 
         for (size_t j = 0; j < struct_type->as.struct_type.field_count; j++) {
             AstFieldDecl *fdecl = (AstFieldDecl*)dynarray_get(struct_decl->fields, j);
             struct_type->as.struct_type.fields[j].name = fdecl->name;
             struct_type->as.struct_type.fields[j].type = resolve_ast_type(ctx, global_scope, fdecl->type);
+            
+            // Populate field_map with 1-based index to avoid NULL (0) collisions
+            hashmap_put(struct_type->as.struct_type.field_map, fdecl->name->key, (void*)(uintptr_t)(j + 1), ptr_hash, ptr_cmp);
         }
     }
 
