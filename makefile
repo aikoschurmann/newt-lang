@@ -11,7 +11,9 @@ LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
 LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags --libs core analysis bitwriter target native executionengine mcjit orcjit)
 
 # Base flags
-CFLAGS_BASE := -Iinclude -Iinclude/cli -Iinclude/core -Iinclude/codegen -Iinclude/datastructures -Iinclude/lexing -Iinclude/parsing -Iinclude/sema -Iinclude/types $(LLVM_CFLAGS) -MMD -MP -g
+CFLAGS_BASE := -Iinclude -Iinclude/cli -Iinclude/core -Iinclude/codegen -Iinclude/datastructures -Iinclude/lexing -Iinclude/parsing -Iinclude/sema -Iinclude/types $(LLVM_CFLAGS) -MMD -MP -g \
+    -Wall -Wextra -Wno-unused-parameter \
+    -Wshadow -Wstrict-prototypes -Wmissing-prototypes
 LDFLAGS_BASE := -lm $(LLVM_LDFLAGS) -rdynamic
 
 # Release flags

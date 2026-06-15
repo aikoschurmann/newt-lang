@@ -1,5 +1,0 @@
-CODEGEN_EXIT("deep_recursion", "fn fact(n: i32) -> i32 { if (n <= 1) { return 1; } return n * fact(n - 1); } fn main() -> i32 { return fact(10); }", 3628800)
-CODEGEN_EXIT("large_stack", "fn main() -> i32 { arr: i32[5000]; arr[4999] = 1337; return arr[4999]; }", 1337)
-CODEGEN_EXIT("short_circuit_and", "fn fail() -> bool { return 1 / 0 == 0; } fn main() -> i32 { if (false && fail()) { return 1; } return 0; }", 0)
-CODEGEN_EXIT("short_circuit_or", "fn fail() -> bool { return 1 / 0 == 0; } fn main() -> i32 { if (true || fail()) { return 1; } return 0; }", 1)
-CODEGEN_EXIT("alignment_stress", "struct S { a: char; b: i64; c: bool; } fn main() -> i32 { s: S; s.b = 123456789; return s.b as i32; }", 123456789)

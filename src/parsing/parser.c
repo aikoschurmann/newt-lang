@@ -69,6 +69,24 @@ void create_parse_error(ParseError *err_out, Parser *p, const char *message, Tok
     err_out->token = token;
 }
 
+AstNode *new_node_or_err(Parser *p, AstNodeType kind, ParseError *err, const char *oom_msg) {
+    AstNode *n = ast_create_node(kind, p->arena, p->filename);
+    if (!n) {
+        if (err) create_parse_error(err, p, oom_msg, NULL);
+    }
+    return n;
+}
+
+DynArray *alloc_dynarray(Parser *p, ParseError *err, size_t elem_size, int initial_capacity, const char *oom_msg) {
+    DynArray *arr = arena_alloc(p->arena, sizeof(DynArray));
+    if (!arr) {
+        if (err) create_parse_error(err, p, oom_msg, NULL);
+        return NULL;
+    }
+    dynarray_init_in_arena(arr, p->arena, elem_size, initial_capacity);
+    return arr;
+}
+
 
 // === ANSI colors for nicer output ===
 #define RED     "\x1b[31m"

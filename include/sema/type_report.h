@@ -11,7 +11,8 @@ typedef enum {
     TE_UNKNOWN_TYPE,       
     TE_REDECLARATION,      
     TE_UNDECLARED,         
-    TE_INCOMPLETE_TYPE,    // New: Variable declared with incomplete type (e.g. missing array size)
+    TE_INCOMPLETE_TYPE,    // Variable declared with incomplete type (e.g. missing array size)
+    TE_EXPECTED_TYPE_ARG,  // Expected a type argument (e.g., for @alloc)
     
     // Type mismatch errors
     TE_TYPE_MISMATCH,      

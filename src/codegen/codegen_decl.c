@@ -16,7 +16,7 @@ void codegen_decl_proto(CodegenContext *ctx, AstNode *decl) {
         
         size_t param_count = fn_type_sema->as.func.param_count;
         size_t llvm_param_count = param_count + (sret ? 1 : 0);
-        LLVMTypeRef *llvm_params = malloc(sizeof(LLVMTypeRef) * llvm_param_count);
+        LLVMTypeRef *llvm_params = xmalloc(sizeof(LLVMTypeRef) * llvm_param_count);
 
         size_t idx = 0;
         if (sret) {
@@ -150,7 +150,7 @@ void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
                 DynArray *stmts = fdecl->body->data.block.statements;
                 for (size_t i = 0; i < stmts->count; i++) {
                     AstNode *stmt = *(AstNode**)dynarray_get(stmts, i);
-                    codegen_expr(ctx, stmt);
+                    codegen_statement(ctx, stmt);
                 }
             } else {
                 codegen_statement(ctx, fdecl->body);
@@ -186,7 +186,7 @@ void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
             
         } else if (fdecl->link_name) {
             Slice *s = (Slice*)fdecl->link_name->key;
-            char *ext_name = malloc(s->len + 1);
+            char *ext_name = xmalloc(s->len + 1);
             memcpy(ext_name, s->ptr, s->len);
             ext_name[s->len] = '\0';
 
@@ -203,7 +203,7 @@ void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
             size_t param_count = LLVMCountParams(func);
             LLVMValueRef *args = NULL;
             if (param_count > 0) {
-                args = malloc(sizeof(LLVMValueRef) * param_count);
+                args = xmalloc(sizeof(LLVMValueRef) * param_count);
                 for (size_t i = 0; i < param_count; i++) {
                     args[i] = LLVMGetParam(func, (unsigned int)i);
                 }
@@ -234,6 +234,7 @@ void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
             }
             LLVMValueRef gvar = LLVMGetNamedGlobal(ctx->module, name);
             if (gvar) {
+                // If it's a global constant, we can use the is_llvm_const_safe flag to ensure we get a constant back
                 LLVMValueRef init_val = codegen_expr(ctx, vdecl->initializer);
                 if (init_val && LLVMIsConstant(init_val))
                     LLVMSetInitializer(gvar, init_val);

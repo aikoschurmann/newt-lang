@@ -46,6 +46,11 @@ static size_t type_hasher(void *ptr) {
             h = hash_combine(h, (size_t)type->as.array.size);
             break;
 
+        case TYPE_SLICE:
+            // Mix Child's Hash
+            h = hash_combine(h, type->as.slice.base->cached_hash);
+            break;
+
         case TYPE_FUNCTION:
             // Mix Return Type Hash
             h = hash_combine(h, type->as.func.return_type->cached_hash);
@@ -128,7 +133,7 @@ static int type_comparator(void *a, void *b) {
 }
 
 
-void *type_copy_func(Arena *arena, const void *data, size_t len) {
+static void *type_copy_func(Arena *arena, const void *data, size_t len) {
     if (!arena || !data) return NULL;
     
     // The input 'data' is the pointer we passed to `intern` as `slice->ptr`
@@ -246,9 +251,16 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
 
     ts->t_bool = create_primitive(ts, PRIM_BOOL);
     ts->t_char = create_primitive(ts, PRIM_CHAR);
-    ts->t_str = create_primitive(ts, PRIM_STR);
     
-    ts->t_void = create_primitive(ts, PRIM_VOID);
+    // Create canonical str type (*char)
+    Type str_proto = { .kind = TYPE_POINTER, .as.ptr.base = ts->t_char };
+    InternResult *str_res = intern_type(ts, &str_proto);
+    ts->t_str = (Type*)((Slice*)str_res->key)->ptr;
+    
+    // Create canonical void type
+    Type void_proto = { .kind = TYPE_VOID };
+    InternResult *void_res = intern_type(ts, &void_proto);
+    ts->t_void = (Type*)((Slice*)void_res->key)->ptr;
 
 
     // 1. Manually create the void* type prototype

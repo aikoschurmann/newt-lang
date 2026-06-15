@@ -25,7 +25,7 @@ char* mangle_name(CodegenContext *ctx, CompilationUnit *unit, InternResult *symb
     if (!unit || !unit->logical_path) {
         // Main module: no mangling
         Slice *s = (Slice*)symbol_name->key;
-        char *name = malloc(s->len + 1);
+        char *name = xmalloc(s->len + 1);
         memcpy(name, s->ptr, s->len);
         name[s->len] = '\0';
         return name;
@@ -34,10 +34,10 @@ char* mangle_name(CodegenContext *ctx, CompilationUnit *unit, InternResult *symb
     Slice *s = (Slice*)symbol_name->key;
     // __mod_<logical_path>_<symbol_name>
     size_t len = strlen(unit->logical_path) + s->len + 10;
-    char *mangled = malloc(len);
+    char *mangled = xmalloc(len);
 
     // Replace dots with underscores in logical path
-    char *log_path_fixed = strdup(unit->logical_path);
+    char *log_path_fixed = xstrdup(unit->logical_path);
     for (char *p = log_path_fixed; *p; p++) if (*p == '.') *p = '_';
 
     snprintf(mangled, len, "__mod_%s_%.*s", log_path_fixed, (int)s->len, s->ptr);
@@ -51,6 +51,15 @@ size_t struct_field_index(Type *struct_type, const char *field_name) {
     for (size_t i = 0; i < struct_type->as.struct_type.field_count; i++) {
         Slice *name = (Slice*)struct_type->as.struct_type.fields[i].name->key;
         if (name->len == strlen(field_name) && memcmp(name->ptr, field_name, name->len) == 0) {
+            return i;
+        }
+    }
+    return (size_t)-1;
+}
+
+size_t get_struct_field_index(Type *struct_type, InternResult *field_name) {
+    for (size_t i = 0; i < struct_type->as.struct_type.field_count; i++) {
+        if (struct_type->as.struct_type.fields[i].name == field_name) {
             return i;
         }
     }

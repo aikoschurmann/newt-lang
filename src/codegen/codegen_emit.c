@@ -4,7 +4,7 @@
 #include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/Support.h>
 
-void codegen_initialize() {
+void codegen_initialize(void) {
     LLVMInitializeAllTargetInfos();
     LLVMInitializeAllTargets();
     LLVMInitializeAllTargetMCs();
@@ -106,7 +106,7 @@ int codegen_run_jit(CodegenContext *ctx) {
     }
 
     uint64_t addr = LLVMGetFunctionAddress(engine, "main");
-    int (*main_ptr)() = (int (*)())addr;
+    int (*main_ptr)(void) = (int (*)(void))addr;
     int result = main_ptr();
 
     LLVMModuleRef removed_module;

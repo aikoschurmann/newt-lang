@@ -1,5 +1,6 @@
 #include "compiler_helpers.h"
 #include "../harness/test_harness.h"
+#include "core/module_loader.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -44,6 +45,51 @@ TestCompileResult test_compile_source(const char *src) {
     
     hashmap_put(loader->units, unit->absolute_path, unit, str_hash, str_cmp);
     dynarray_push_value(loader->units_ordered, &unit);
+
+    // Manually trigger import resolution for the virtual <test> unit
+    if (unit->ast_root && unit->ast_root->node_type == AST_PROGRAM) {
+        AstProgram *prog = &unit->ast_root->data.program;
+        if (prog->decls) {
+            for (size_t i = 0; i < prog->decls->count; i++) {
+                AstNode *decl = *(AstNode**)dynarray_get(prog->decls, i);
+                if (decl->node_type == AST_IMPORT_DECLARATION) {
+                    AstImportDeclaration *imp = &decl->data.import_declaration;
+                    
+                    char cl_buf[512] = {0};
+                    char cp_buf[512] = {0};
+                    
+                    for (size_t j = 0; j < imp->module_path->count; j++) {
+                        InternResult *part = *(InternResult**)dynarray_get(imp->module_path, j);
+                        Slice *s = (Slice*)part->key;
+                        if (j > 0) {
+                            strcat(cl_buf, ".");
+                            strcat(cp_buf, "/");
+                        }
+                        strncat(cl_buf, s->ptr, s->len);
+                        strncat(cp_buf, s->ptr, s->len);
+                    }
+
+                    char target_file[1024];
+                    snprintf(target_file, sizeof(target_file), "%s/%s.tn", opts.stdlib_path, cp_buf);
+                    
+                    FILE *f = fopen(target_file, "r");
+                    if (f) {
+                        fclose(f);
+                    } else {
+                        snprintf(target_file, sizeof(target_file), "%s/%s/module.tn", opts.stdlib_path, cp_buf);
+                    }
+                    
+                    char *target_logical = arena_alloc(loader->arena, strlen(cl_buf) + 1);
+                    strcpy(target_logical, cl_buf);
+                    
+                    int load_res = load_module_recursive(loader, target_file, target_logical, unit->absolute_path, 1);
+                    if (load_res == 0) { // EXIT_OK
+                        imp->resolved_logical_path = target_logical;
+                    }
+                }
+            }
+        }
+    }
 
     // 5. Sema
     res.store = typestore_create(res.arena, identifiers, keywords);
@@ -117,6 +163,12 @@ bool test_check_sema_error(const char *src, TypeErrorKind kind) {
 int test_run_and_get_exit_code(const char *src) {
     TestCompileResult res = test_compile_source(src);
     if (res.failed) {
+        if (res.sema_ctx.errors) {
+            for (size_t i = 0; i < res.sema_ctx.errors->count; i++) {
+                TypeError *err = (TypeError*)dynarray_get(res.sema_ctx.errors, i);
+                fprintf(stderr, "      Sema Error %zu: Kind %d\n", i + 1, err->kind);
+            }
+        }
         test_cleanup_compilation(&res);
         return -100;
     }

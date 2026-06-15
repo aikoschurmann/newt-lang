@@ -147,6 +147,11 @@ int is_lvalue_node(AstNode *node) {
             /* '&' (address-of), '+', '-', '!' are not lvalues. */
             return 0;
 
+        case AST_STRUCT_LITERAL:
+        case AST_INITIALIZER_LIST:
+            /* Materialized literals are lvalues. */
+            return 1;
+
         case AST_POSTFIX_EXPR: {
             /* Postfix expressions like 'a++' or 'a--' are rvalues */
             OpKind k = node->data.postfix_expr.op;
@@ -282,7 +287,7 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
         printf(">\033[0m");
     }
     // Add const info if relevant
-    if (node->is_const_expr) {
+    if (node->is_foldable_const) {
         printf(" \033[33m(const:");
         switch (node->const_value.type) {
             case INT_LITERAL:
@@ -299,6 +304,8 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
                 break;
         }
         printf(")\033[0m");
+    } else if (node->is_llvm_const_safe) {
+        printf(" \033[33m(const-safe)\033[0m");
     }
     printf("\n");
     

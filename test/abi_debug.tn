@@ -1,8 +1,0 @@
-struct Large { a: i64; b: i64; c: i64; }
-fn take_large(l: Large) -> i64 {
-    return l.a + l.b + l.c;
-}
-fn main() -> i64 {
-    l: Large = Large { a: 1, b: 2, c: 3 };
-    return take_large(l);
-}

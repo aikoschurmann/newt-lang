@@ -8,7 +8,7 @@ LLVMTypeRef get_llvm_function_type(CodegenContext *ctx, Type *t) {
     
     size_t param_count = t->as.func.param_count;
     size_t llvm_arg_count = param_count + (sret ? 1 : 0);
-    LLVMTypeRef *llvm_params = malloc(sizeof(LLVMTypeRef) * llvm_arg_count);
+    LLVMTypeRef *llvm_params = xmalloc(sizeof(LLVMTypeRef) * llvm_arg_count);
 
     size_t idx = 0;
     if (sret) {
@@ -33,9 +33,10 @@ bool type_is_address_only(Type *t) {
     if (!t) ICE("type_is_address_only: NULL type reached codegen");
     switch (t->kind) {
         case TYPE_FUNCTION: return true;                         // functions decay to pointer
-        case TYPE_ARRAY:    return t->as.array.size_known;       // [N]T lives at its address; T[] (slice) is loaded as a value
+        case TYPE_ARRAY:    return true;                         // [N]T lives at its address
+        case TYPE_SLICE:    return false;                        // T[] (slice) is loaded as a value
         case TYPE_VOID:     return true;                         // nothing to load
-        default:            return false;                        // primitives, pointers, slices-as-struct, structs -> load by value
+        default:            return false;                        // primitives, pointers, structs -> load by value
     }
 }
 
@@ -71,8 +72,6 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
                 case PRIM_F64:  res = LLVMDoubleTypeInContext(ctx->context); break;
                 case PRIM_BOOL: res = LLVMInt8TypeInContext(ctx->context); break;
                 case PRIM_CHAR: res = LLVMInt8TypeInContext(ctx->context); break;
-                case PRIM_VOID: res = LLVMVoidTypeInContext(ctx->context); break;
-                case PRIM_STR:  res = LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0); break;
                 default:        ICE("get_llvm_type: unrecognized primitive kind %d", t->as.primitive);
             }
             break;
@@ -81,9 +80,10 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
             res = LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0);
             break;
         case TYPE_ARRAY:
-            if (t->as.array.size_known) {
-                res = LLVMArrayType(get_llvm_type(ctx, t->as.array.base), (unsigned int)t->as.array.size);
-            } else {
+            res = LLVMArrayType(get_llvm_type(ctx, t->as.array.base), (unsigned int)t->as.array.size);
+            break;
+        case TYPE_SLICE:
+            {
                 // FAT POINTER (Slice): struct { T* ptr, i64 len }
                 LLVMTypeRef elements[] = {
                     LLVMPointerType(LLVMInt8TypeInContext(ctx->context), 0),
@@ -107,7 +107,7 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
             // Now resolve the body
             size_t field_count = t->as.struct_type.field_count;
             if (field_count > 0) {
-                LLVMTypeRef *field_types = malloc(sizeof(LLVMTypeRef) * field_count);
+                LLVMTypeRef *field_types = xmalloc(sizeof(LLVMTypeRef) * field_count);
                 for (size_t i = 0; i < field_count; i++) {
                     field_types[i] = get_llvm_type(ctx, t->as.struct_type.fields[i].type);
                 }

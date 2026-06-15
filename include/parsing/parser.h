@@ -5,6 +5,8 @@
 #include "dynamic_array.h"
 #include "arena.h"
 
+#include "ast.h"
+
 /* Parser structure */
 typedef struct {
     DynArray   *tokens;   /* borrowed: DynArray of Token (Tokens stored in tokens.data) */
@@ -43,3 +45,7 @@ void     create_parse_error(ParseError *err_out, Parser *p, const char *message,
 
 /* Pretty-print a parse error (to stderr). */
 void     print_parse_error(ParseError *error);
+
+/* Shared helpers for creating nodes and dynamic arrays with error handling */
+AstNode *new_node_or_err(Parser *p, AstNodeType kind, ParseError *err, const char *oom_msg);
+DynArray *alloc_dynarray(Parser *p, ParseError *err, size_t elem_size, int initial_capacity, const char *oom_msg);

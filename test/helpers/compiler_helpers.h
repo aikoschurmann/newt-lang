@@ -3,6 +3,9 @@
 #include "lexing/lexer.h"
 #include "parsing/parser.h"
 #include "parsing/parse_statements.h"
+#include "parsing/parse_expressions.h"
+#include "parsing/parse_types.h"
+#include "parsing/parse_declarations.h"
 #include "sema/typecheck.h"
 #include "codegen/codegen.h"
 

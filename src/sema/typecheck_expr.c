@@ -10,14 +10,20 @@
 #include <string.h>
 #include <stdio.h>
 
-// -----------------------------------------------------------------------------
-// Cast Helper
-// -----------------------------------------------------------------------------
+// =============================================================================
+// SECTION 1: CASTING AND COERCION HELPERS
+// =============================================================================
 
+/**
+ * Inserts an explicit AST_CAST node between a node and its parent.
+ * This is used for both implicit coercions and explicit 'as' casts.
+ */
 void insert_cast(TypeCheckContext *ctx, AstNode *node, Type *to_type) {
     if (!node || !to_type) return;
     if (node->type == to_type) return;
 
+    // We clone the current node into a new memory location so the original
+    // node can be transformed into the cast container.
     AstNode *original = arena_alloc(ctx->store->arena, sizeof(AstNode));
     memcpy(original, node, sizeof(AstNode));
 
@@ -28,9 +34,11 @@ void insert_cast(TypeCheckContext *ctx, AstNode *node, Type *to_type) {
     node->data.cast_expr.expr = original;
     node->data.cast_expr.target_type = to_type;
 
-    node->is_const_expr = original->is_const_expr;
+    // Propagate constant-folding metadata
+    node->is_foldable_const = original->is_foldable_const;
+    node->is_llvm_const_safe = original->is_llvm_const_safe;
     
-    if (original->is_const_expr) {
+    if (original->is_foldable_const) {
         node->const_value = original->const_value; 
         if (type_is_integer(original->type) && type_is_float(to_type)) {
             node->const_value.type = FLOAT_LITERAL;
@@ -46,9 +54,35 @@ void insert_cast(TypeCheckContext *ctx, AstNode *node, Type *to_type) {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Helpers & Folding
-// -----------------------------------------------------------------------------
+/**
+ * Checks if a node can be implicitly coerced to the expected type.
+ * If yes, it performs the cast and returns the new type.
+ * If no, it logs a TE_TYPE_MISMATCH error.
+ */
+Type* coerce_or_error(TypeCheckContext *ctx, AstNode *node, Type *expected) {
+    if (!node || !expected) return node ? node->type : NULL;
+    Type *actual = node->type;
+    if (actual == expected) return actual;
+
+    // Check bidirectional compatibility rules (e.g. array-to-slice decay)
+    if (type_can_implicit_cast(expected, actual)) {
+        insert_cast(ctx, node, expected);
+        return expected;
+    }
+
+    TypeError err = {
+        .kind = TE_TYPE_MISMATCH,
+        .span = node->span,
+        .filename = ctx->filename,
+        .as.mismatch = { .expected = expected, .actual = actual }
+    };
+    dynarray_push_value(ctx->errors, &err);
+    return NULL;
+}
+
+// =============================================================================
+// SECTION 2: CONSTANT FOLDING HELPERS
+// =============================================================================
 
 static Type* unite_numeric_types(TypeCheckContext *ctx, Type *a, Type *b) {
     TypeStore *s = ctx->store;
@@ -61,18 +95,20 @@ static Type* unite_numeric_types(TypeCheckContext *ctx, Type *a, Type *b) {
 }
 
 static void fold_unary_op(AstNode *node, OpKind op, AstNode *operand) {
-    if (!operand->is_const_expr) return;
+    if (!operand->is_foldable_const) return;
     LiteralType type = operand->const_value.type;
 
     if (op == OP_NOT && type == BOOL_LITERAL) {
-        node->is_const_expr = 1;
+        node->is_foldable_const = 1;
+        node->is_llvm_const_safe = 1;
         node->const_value.type = BOOL_LITERAL;
         node->const_value.value.bool_val = !operand->const_value.value.bool_val;
         return;
     }
 
     if (op == OP_SUB) {
-        node->is_const_expr = 1;
+        node->is_foldable_const = 1;
+        node->is_llvm_const_safe = 1;
         node->const_value.type = type;
         if (type == INT_LITERAL) {
             node->const_value.value.int_val = -operand->const_value.value.int_val;
@@ -83,7 +119,7 @@ static void fold_unary_op(AstNode *node, OpKind op, AstNode *operand) {
 }
 
 static void fold_binary_op(AstNode *node, OpKind op, AstNode *l, AstNode *r) {
-    if (!l->is_const_expr || !r->is_const_expr) return;
+    if (!l->is_foldable_const || !r->is_foldable_const) return;
 
     LiteralType ltype = l->const_value.type;
     LiteralType rtype = r->const_value.type;
@@ -109,7 +145,8 @@ static void fold_binary_op(AstNode *node, OpKind op, AstNode *l, AstNode *r) {
             default: return; 
         }
 
-        node->is_const_expr = 1;
+        node->is_foldable_const = 1;
+        node->is_llvm_const_safe = 1;
         if (is_bool) {
             node->const_value.type = BOOL_LITERAL;
             node->const_value.value.bool_val = (bool)res;
@@ -140,7 +177,8 @@ static void fold_binary_op(AstNode *node, OpKind op, AstNode *l, AstNode *r) {
             default: return;
         }
 
-        node->is_const_expr = 1;
+        node->is_foldable_const = 1;
+        node->is_llvm_const_safe = 1;
         if (is_bool) {
             node->const_value.type = BOOL_LITERAL;
             node->const_value.value.bool_val = (bool)res;
@@ -151,20 +189,25 @@ static void fold_binary_op(AstNode *node, OpKind op, AstNode *l, AstNode *r) {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Core Checkers
-// -----------------------------------------------------------------------------
+// =============================================================================
+// SECTION 3: CORE EXPRESSION CHECKERS
+// =============================================================================
 
+/**
+ * Resolves the concrete type of a literal kind based on context.
+ * For example, an INT_LITERAL might resolve to i64 by default, or f64 if expected.
+ */
 static Type* resolve_literal_type(TypeCheckContext *ctx, LiteralType lit_kind, Type *expected) {
     TypeStore *s = ctx->store;
     switch (lit_kind) {
         case INT_LITERAL:
+            // Numeric adaptation: Literals are polymorphic until they hit a concrete requirement.
             if (expected && type_is_float(expected)) return expected;
             if (expected && type_is_integer(expected)) return expected;
-            return s->t_i64;
+            return s->t_i64; // Default to i64
         case FLOAT_LITERAL:
             if (expected && type_is_float(expected)) return expected;
-            return s->t_f64;
+            return s->t_f64; // Default to f64
         case BOOL_LITERAL:   return s->t_bool;
         case CHAR_LITERAL:   return s->t_char;
         case STRING_LITERAL: return s->t_str;
@@ -172,86 +215,154 @@ static Type* resolve_literal_type(TypeCheckContext *ctx, LiteralType lit_kind, T
     }
 }
 
+/**
+ * Validates a literal expression and performs literal-level constant folding.
+ */
 Type* check_literal(TypeCheckContext *ctx, AstNode *expr, Type *expected_type) {
+    // =========================================================================
+    // 1. TYPE RESOLUTION
+    // =========================================================================
     Type *type = resolve_literal_type(ctx, expr->data.literal.type, expected_type);
     
+    // Adapt integer literals to floats if that's what's expected (e.g., `float x = 5;`)
     if (expr->data.literal.type == INT_LITERAL && type && type_is_float(type)) {
         expr->data.literal.type = FLOAT_LITERAL;
         expr->data.literal.value.float_val = (double)expr->data.literal.value.int_val;
     }
 
-    expr->is_const_expr = 1;
+    // =========================================================================
+    // 2. CONSTANT EVALUATION
+    // =========================================================================
+    // Literals are always foldable and safe for LLVM global initializers.
+    expr->is_foldable_const = 1;
+    expr->is_llvm_const_safe = 1;
     expr->const_value.type  = expr->data.literal.type;
     expr->const_value.value = expr->data.literal.value;
+    
     expr->type = type;
     return type;
 }
+
+/**
+ * Returns the module-level scope (depth 1) for a given scope.
+ * If the scope is already at depth 0 or 1, it returns it as-is.
+ */
+static Scope* get_module_scope(Scope *scope) {
+    while (scope && scope->depth > 1) {
+        scope = scope->parent;
+    }
+    return scope;
+}
+
+/**
+ * Resolves an identifier to its symbol and determines its type and constancy.
+ * 
+ * This function performs three main tasks:
+ * 1. Symbol Lookup: Searches the scope hierarchy for the identifier's name.
+ * 2. Demand-driven Resolution: If the symbol is a global constant that hasn't
+ *    been evaluated yet, it triggers its evaluation.
+ * 3. Constancy Propagation: Updates the AST node with type and constant value
+ *    information if the symbol is a known constant.
+ * 
+ * @param ctx   The type-checking context.
+ * @param scope The current scope where the lookup starts.
+ * @param expr  The AST node representing the identifier.
+ * @return The resolved Type of the identifier, or NULL on failure.
+ */
 Type* check_identifier(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstIdentifier *ident = &expr->data.identifier;
 
+    // -------------------------------------------------------------------------
+    // 1. SYMBOL LOOKUP
+    // -------------------------------------------------------------------------
     Symbol *sym = scope_lookup_symbol(scope, ident->intern_result, ctx->filename);
 
     if (!sym) {
-        const char *name_str = "<unknown>";
-        if (ident->intern_result && ident->intern_result->key) {
-            name_str = ((Slice*)ident->intern_result->key)->ptr;
-        }
-        TypeError err = { .kind = TE_UNDECLARED, .span = expr->span, .filename = ctx->filename, .as.name.name = name_str };
+        const char *name = (ident->intern_result && ident->intern_result->key) 
+            ? ((Slice*)ident->intern_result->key)->ptr 
+            : "<unknown>";
+
+        TypeError err = { 
+            .kind = TE_UNDECLARED, 
+            .span = expr->span, 
+            .filename = ctx->filename, 
+            .as.name.name = name 
+        };
         dynarray_push_value(ctx->errors, &err);
         return NULL;
     }
 
-    ident->symbol = sym; // Store resolved symbol!
+    // Store resolved symbol for later stages (Codegen/Sema)
+    ident->symbol = sym; 
 
-    // Demand-driven resolution for global constants
-    if ((sym->flags & SYMBOL_FLAG_CONST) && !(sym->flags & SYMBOL_FLAG_COMPUTED_VALUE)) {
-        if (sym->decl_node) {
-            // Recurse into variable declaration check
-            Scope *global_scope = scope;
-            // Bound traversal to the unit's global scope (depth == 1)
-            while (global_scope && global_scope->depth > 1) {
-                global_scope = global_scope->parent;
-            }
-            if (global_scope) {
-                check_variable_declaration(ctx, global_scope, sym->decl_node);
-            }
+    // -------------------------------------------------------------------------
+    // 2. DEMAND-DRIVEN GLOBAL RESOLUTION
+    // -------------------------------------------------------------------------
+    // If we're accessing a global constant that hasn't been computed yet, 
+    // we jump to its declaration to resolve it now. This enables 
+    // out-of-order global access.
+    bool is_unresolved_const = (sym->flags & SYMBOL_FLAG_CONST) && 
+                              !(sym->flags & SYMBOL_FLAG_COMPUTED_VALUE);
+    
+    if (is_unresolved_const && sym->decl_node) {
+        Scope *module_scope = get_module_scope(scope);
+        if (module_scope) {
+            check_variable_declaration(ctx, module_scope, sym->decl_node);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // 3. CONSTANCY PROPAGATION
+    // -------------------------------------------------------------------------
     expr->type = sym->type;
-    if ((sym->flags & SYMBOL_FLAG_CONST) && (sym->flags & SYMBOL_FLAG_COMPUTED_VALUE)) {
-        expr->is_const_expr = 1;
+    expr->is_foldable_const = 0;
+    expr->is_llvm_const_safe = 0;
+
+    bool is_computed_const = (sym->flags & SYMBOL_FLAG_CONST) && 
+                            (sym->flags & SYMBOL_FLAG_COMPUTED_VALUE);
+
+    if (is_computed_const) {
+        // Map primitives to their literal equivalents for constant folding.
         if (type_is_integer(sym->type)) {
-            expr->const_value.type = INT_LITERAL;
-            expr->const_value.value.int_val = sym->value.int_val;
+            expr->is_foldable_const = 1;
+            expr->const_value = (ConstValue){ .type = INT_LITERAL, .value.int_val = sym->value.int_val };
         } else if (type_is_float(sym->type)) {
-            expr->const_value.type = FLOAT_LITERAL;
-            expr->const_value.value.float_val = sym->value.float_val;
+            expr->is_foldable_const = 1;
+            expr->const_value = (ConstValue){ .type = FLOAT_LITERAL, .value.float_val = sym->value.float_val };
         } else if (type_is_bool(sym->type)) {
-            expr->const_value.type = BOOL_LITERAL;
-            expr->const_value.value.bool_val = sym->value.bool_val;
+            expr->is_foldable_const = 1;
+            expr->const_value = (ConstValue){ .type = BOOL_LITERAL, .value.bool_val = sym->value.bool_val };
         } else if (type_is_char(sym->type)) {
-            expr->const_value.type = CHAR_LITERAL;
-            expr->const_value.value.char_val = (char)sym->value.int_val;
-        } else if (sym->type->kind == TYPE_STRUCT || sym->type->kind == TYPE_ARRAY) {
-             // Structs and arrays can be constant too, even if we don't store their full value in ConstValue.
-             // The is_const_expr flag tells codegen to handle them specially (e.g. as LLVM constant).
-             expr->is_const_expr = 1;
+            expr->is_foldable_const = 1;
+            expr->const_value = (ConstValue){ .type = CHAR_LITERAL, .value.char_val = (char)sym->value.int_val };
         }
-    } else {
-        expr->is_const_expr = 0;
+
+        // Foldable constants are always LLVM-safe. Aggregates (structs, arrays, slices) 
+        // are only LLVM-safe since they don't fit in the simple union-based ConstValue.
+        bool is_aggregate = sym->type->kind == TYPE_STRUCT || 
+                           sym->type->kind == TYPE_ARRAY || 
+                           sym->type->kind == TYPE_SLICE;
+        
+        expr->is_llvm_const_safe = expr->is_foldable_const || is_aggregate;
     }
+
     return sym->type;
 }
 
+/**
+ * Validates a function call expression, checking arguments against parameters.
+ */
 Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstCallExpr *call = &expr->data.call_expr;
     
-    // Check if the callee is an intrinsic
+    // =========================================================================
+    // 1. INTRINSIC DISPATCH
+    // =========================================================================
+    // Some "calls" are actually compiler intrinsics (like `len()`).
     if (call->callee->node_type == AST_IDENTIFIER) {
         Symbol *sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result, ctx->filename);
         if (sym && sym->kind == SYMBOL_VALUE_INTRINSIC) {
-            expr->type = ctx->store->t_void; // Intrinsics currently return void
+            expr->type = ctx->store->t_void; // Placeholder
             
             size_t arg_count = call->args ? call->args->count : 0;
             for (size_t i = 0; i < arg_count; i++) {
@@ -259,12 +370,15 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                 check_expression(ctx, scope, arg, NULL);
             }
 
-            // We'll store the intrinsic kind in the callee node's metadata
             call->callee->type = sym->type; 
+            call->callee->data.identifier.symbol = sym;
             return expr->type;
         }
     }
 
+    // =========================================================================
+    // 2. CALLEE RESOLUTION
+    // =========================================================================
     Type *callee_type = check_expression(ctx, scope, call->callee, NULL);
     if (!callee_type) return NULL;
 
@@ -274,6 +388,9 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         return NULL;
     }
 
+    // =========================================================================
+    // 3. ARGUMENT VALIDATION
+    // =========================================================================
     size_t param_count = callee_type->as.func.param_count;
     size_t arg_count = call->args ? call->args->count : 0;
 
@@ -286,53 +403,92 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     for (size_t i = 0; i < arg_count; i++) {
         AstNode *arg = *(AstNode**)dynarray_get(call->args, i);
         Type *param_type = callee_type->as.func.params[i];
-        Type *arg_type = check_expression(ctx, scope, arg, param_type);
         
-        if (arg_type && param_type && arg_type != param_type) {
-            if (type_can_implicit_cast(param_type, arg_type)) {
-                insert_cast(ctx, arg, param_type);
-            } else {
-                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = arg->span, .filename = ctx->filename, .as.mismatch = { .expected = param_type, .actual = arg_type } };
-                dynarray_push_value(ctx->errors, &err);
-            }
+        // Recurse with top-down type hint from the parameter.
+        if (check_expression(ctx, scope, arg, param_type)) {
+            coerce_or_error(ctx, arg, param_type);
         }
     }
+
     return callee_type->as.func.return_type;
 }
 
-Type* check_subscript(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
+// =============================================================================
+// SECTION 4: COLLECTIONS AND ASSIGNMENT
+// =============================================================================
+
+Type* check_subscript(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstSubscriptExpr *subscript = &expr->data.subscript_expr;
-    Type *base_type = check_expression(ctx, scope, subscript->target, NULL);
-    if (!base_type) return NULL;
+    
+    // =========================================================================
+    // 1. TOP-DOWN TYPE INFERENCE (BIDIRECTIONAL TYPE CHECKING)
+    // =========================================================================
+    // If the parent expression knows what type it expects *out* of this subscript 
+    // (e.g., `int x = arr[0];` expects an `int`), we can infer that the `target` 
+    // (the `arr`) must be a collection of `int`s.
+    Type *target_expected = NULL;
+    if (expected_type) {
+        // We dynamically construct a prototype slice to act as a "generic collection" hint.
+        // If we expect the element to be `T`, the collection hint becomes `[]T`.
+        Type proto = {0};
+        proto.kind = TYPE_SLICE; 
+        proto.as.slice.base = expected_type;
+        
+        // Intern the prototype to get a safe, canonical type pointer to pass down.
+        InternResult *res = intern_type(ctx->store, &proto);
+        target_expected = res ? (Type*)((Slice*)res->key)->ptr : NULL;
+    }
 
-    bool is_str = (base_type->kind == TYPE_PRIMITIVE && base_type->as.primitive == PRIM_STR);
+    // =========================================================================
+    // 2. TARGET RESOLUTION
+    // =========================================================================
+    // Check the target expression (the `a` in `a[i]`), passing down our synthesized hint.
+    // This is crucial for things like anonymous nested arrays: `{{1, 2}, {3, 4}}[0]`
+    Type *base_type = check_expression(ctx, scope, subscript->target, target_expected);
+    if (!base_type) return NULL; // Error already logged by check_expression
 
-    if (base_type->kind != TYPE_ARRAY && base_type->kind != TYPE_POINTER && !is_str) {
-        TypeError err = { .kind = TE_NOT_INDEXABLE, .span = subscript->target->span, .filename = ctx->filename, .as.bad_usage.actual = base_type };
+    // Ensure the resolved target type is actually indexable.
+    if (base_type->kind != TYPE_ARRAY && base_type->kind != TYPE_SLICE && base_type->kind != TYPE_POINTER) {
+        TypeError err = { 
+            .kind = TE_NOT_INDEXABLE, 
+            .span = subscript->target->span, 
+            .filename = ctx->filename, 
+            .as.bad_usage.actual = base_type 
+        };
         dynarray_push_value(ctx->errors, &err);
         return NULL;
     }
 
+    // =========================================================================
+    // 3. INDEX RESOLUTION & COERCION
+    // =========================================================================
+    // The index must evaluate to an integer type (we hint for i64).
     Type *index_type = check_expression(ctx, scope, subscript->index, ctx->store->t_i64);
-    if (!index_type || !type_is_integer(index_type)) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = subscript->index->span, .filename = ctx->filename, .as.mismatch = { .expected = ctx->store->t_i64, .actual = index_type } };
-        dynarray_push_value(ctx->errors, &err);
-        return NULL;
+    if (index_type) {
+        // Force coercion to exactly i64 (e.g., if it's an i32 or an implicitly castable literal).
+        coerce_or_error(ctx, subscript->index, ctx->store->t_i64);
+    } else {
+        return NULL; // Failed to typecheck the index
     }
 
-    if (is_str) return ctx->store->t_char;
-
-    if (base_type->kind == TYPE_ARRAY && base_type->as.array.size_known) {
-        // Even if is_const_expr flag is missing (paranoia), check if it's a literal node
-        bool is_const = subscript->index->is_const_expr;
+    // =========================================================================
+    // 4. BOUNDS CHECKING & RETURN TYPE DETERMINATION
+    // =========================================================================
+    // Compile-time bounds checking for fixed-size arrays.
+    if (base_type->kind == TYPE_ARRAY) {
+        // Determine if the index is a constant expression we can evaluate right now.
+        bool is_const = subscript->index->is_foldable_const;
+        
+        // Fallback: If literal wasn't flagged as foldable but IS an integer literal, force it.
         if (!is_const && subscript->index->node_type == AST_LITERAL && subscript->index->data.literal.type == INT_LITERAL) {
-             is_const = true; // Force it for raw literals
+             is_const = true; 
         }
         
         if (is_const) {
             int64_t idx = subscript->index->const_value.value.int_val;
             int64_t limit = base_type->as.array.size;
 
+            // If the literal index is negative or exceeds the known array size, emit an error.
             if (idx < 0 || idx >= limit) {
                 TypeError err = { 
                     .kind = TE_INDEX_OUT_OF_BOUNDS, 
@@ -346,15 +502,29 @@ Type* check_subscript(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         }
     }
 
-    return (base_type->kind == TYPE_ARRAY) ? base_type->as.array.base : base_type->as.ptr.base;
+    // Return the underlying element type depending on the specific collection type.
+    return (base_type->kind == TYPE_ARRAY) ? base_type->as.array.base : 
+           (base_type->kind == TYPE_SLICE) ? base_type->as.slice.base :
+           base_type->as.ptr.base;
 }
 
+/**
+ * Validates an assignment expression, ensuring the LHS is an l-value 
+ * and types are compatible.
+ */
 Type* check_assignment(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstAssignmentExpr *assign = &expr->data.assignment_expr;
 
+    // =========================================================================
+    // 1. LHS/RHS RESOLUTION
+    // =========================================================================
+    // We check the LHS first to get a type hint for the RHS.
     Type *lhs = check_expression(ctx, scope, assign->lvalue, NULL);
     Type *rhs = check_expression(ctx, scope, assign->rvalue, lhs); 
 
+    // =========================================================================
+    // 2. L-VALUE VALIDATION
+    // =========================================================================
     if (!is_lvalue_node(assign->lvalue)) {
         TypeError err = { .kind = TE_NOT_LVALUE, .span = assign->lvalue->span, .filename = ctx->filename };
         dynarray_push_value(ctx->errors, &err);
@@ -363,7 +533,11 @@ Type* check_assignment(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
 
     if (!lhs || !rhs) return NULL;
 
+    // =========================================================================
+    // 3. OPERATOR & TYPE CONSISTENCY
+    // =========================================================================
     if (assign->op != OP_ASSIGN) {
+        // Compound assignments (+=, -=, etc.) require numeric types.
         if (!type_is_numeric(lhs) || !type_is_numeric(rhs)) {
             TypeError err = { .kind = TE_BINOP_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.binop = { .op = assign->op, .left = lhs, .right = rhs } };
             dynarray_push_value(ctx->errors, &err);
@@ -371,28 +545,31 @@ Type* check_assignment(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         }
     }
 
+    // Perform implicit coercion if necessary.
     if (lhs != rhs) {
-        if (type_can_implicit_cast(lhs, rhs)) {
-             insert_cast(ctx, assign->rvalue, lhs);
-        } else {
-             TypeError err = { .kind = TE_TYPE_MISMATCH, .span = assign->rvalue->span, .filename = ctx->filename, .as.mismatch = { .expected = lhs, .actual = rhs } };
-            dynarray_push_value(ctx->errors, &err);
-            return NULL;
-        }
+        coerce_or_error(ctx, assign->rvalue, lhs);
     }
+
     expr->type = lhs;
     return lhs;
 }
 
-// -----------------------------------------------------------------------------
-// Structure Helpers
-// -----------------------------------------------------------------------------
+// =============================================================================
+// SECTION 5: INITIALIZATION & AGGREGATES
+// =============================================================================
 
 static int get_type_rank(Type *t) {
     int rank = 0;
-    while (t && t->kind == TYPE_ARRAY) {
-        rank++;
-        t = t->as.array.base;
+    while (t) {
+        if (t->kind == TYPE_ARRAY) {
+            rank++;
+            t = t->as.array.base;
+        } else if (t->kind == TYPE_SLICE) {
+            rank++;
+            t = t->as.slice.base;
+        } else {
+            break;
+        }
     }
     return rank;
 }
@@ -404,18 +581,35 @@ static int get_initializer_rank(AstNode *node) {
     return 1 + get_initializer_rank(first);
 }
 
-// -----------------------------------------------------------------------------
-// Initializer List Checker
-// -----------------------------------------------------------------------------
-
+/**
+ * Validates an initializer list, ensuring all elements have compatible types
+ * and verifying array/slice structural dimensions (ranks).
+ */
 Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     if (!expr || expr->node_type != AST_INITIALIZER_LIST) return NULL;
     
-    // 1. Context Requirement: We need an expected type to infer structure
-    if (!expected_type) return NULL; 
+    AstInitializeList *list = &expr->data.initializer_list;
+    size_t elem_count = list->elements ? list->elements->count : 0;
+
+    // 1. Context Requirement: If no expected type, try to infer from elements
+    if (!expected_type) {
+        if (elem_count == 0) return NULL; // Cannot infer empty list type
+        
+        AstNode **first_ptr = (AstNode**)dynarray_get(list->elements, 0);
+        Type *first_ty = check_expression(ctx, scope, *first_ptr, NULL);
+        if (!first_ty) return NULL;
+        
+        Type proto = {0};
+        proto.kind = TYPE_ARRAY;
+        proto.as.array.base = first_ty;
+        proto.as.array.size = (int64_t)elem_count;
+        InternResult *res = intern_type(ctx->store, &proto);
+        expected_type = res ? (Type*)((Slice*)res->key)->ptr : NULL;
+        if (!expected_type) return NULL;
+    }
 
     // 2. Structural Mismatch (Array vs Scalar)
-    if (expected_type->kind != TYPE_ARRAY) {
+    if (expected_type->kind != TYPE_ARRAY && expected_type->kind != TYPE_SLICE) {
          TypeError err = {
             .kind = TE_UNEXPECTED_LIST,
             .span = expr->span,
@@ -440,12 +634,9 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         dynarray_push_value(ctx->errors, &err);
         return NULL;
     }
-
-    AstInitializeList *list = &expr->data.initializer_list;
-    size_t elem_count = list->elements ? list->elements->count : 0;
     
     // 4. Size Mismatch
-    if (expected_type->as.array.size_known) {
+    if (expected_type->kind == TYPE_ARRAY) {
         if (elem_count != (size_t)expected_type->as.array.size) {
              TypeError err = {
                 .kind = TE_ARRAY_SIZE_MISMATCH,
@@ -458,7 +649,7 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         }
     }
 
-    Type *base_expected = expected_type->as.array.base;
+    Type *base_expected = (expected_type->kind == TYPE_ARRAY) ? expected_type->as.array.base : expected_type->as.slice.base;
     Type *common_base = NULL;
     bool any_error = false;
 
@@ -471,12 +662,12 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         
         if (!actual_elem_type) {
             any_error = true;
-            // Prevent error cascades: if one element fails, abort checking this list
             break; 
         }
 
         // Structural Consistency
-        if (base_expected->kind == TYPE_ARRAY && actual_elem_type->kind != TYPE_ARRAY) {
+        if ((base_expected->kind == TYPE_ARRAY || base_expected->kind == TYPE_SLICE) && 
+            (actual_elem_type->kind != TYPE_ARRAY && actual_elem_type->kind != TYPE_SLICE)) {
              TypeError err = {
                 .kind = TE_EXPECTED_ARRAY,
                 .span = node->span,
@@ -487,7 +678,8 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
             return NULL;
         }
         
-        if (base_expected->kind != TYPE_ARRAY && actual_elem_type->kind == TYPE_ARRAY) {
+        if ((base_expected->kind != TYPE_ARRAY && base_expected->kind != TYPE_SLICE) && 
+            (actual_elem_type->kind == TYPE_ARRAY || actual_elem_type->kind == TYPE_SLICE)) {
              TypeError err = {
                 .kind = TE_TYPE_MISMATCH,
                 .span = node->span,
@@ -500,24 +692,9 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
         // Explicit Type Check & Cast
         if (actual_elem_type != base_expected) {
-            // Array Size Inference Logic
-            bool is_array_refinement = (base_expected->kind == TYPE_ARRAY && !base_expected->as.array.size_known &&
-                                        actual_elem_type->kind == TYPE_ARRAY && actual_elem_type->as.array.size_known);
-
-            if (is_array_refinement && type_can_implicit_cast(base_expected, actual_elem_type)) {
-                // Compatible size refinement
-            } 
-            else if (type_can_implicit_cast(base_expected, actual_elem_type)) {
-                insert_cast(ctx, node, base_expected);
+            if (coerce_or_error(ctx, node, base_expected)) {
                 actual_elem_type = base_expected; 
             } else {
-                TypeError err = { 
-                    .kind = TE_TYPE_MISMATCH, 
-                    .span = node->span, 
-                    .filename = ctx->filename, 
-                    .as.mismatch = { .expected = base_expected, .actual = actual_elem_type } 
-                };
-                dynarray_push_value(ctx->errors, &err);
                 return NULL;
             }
         }
@@ -531,44 +708,36 @@ Type* check_initializer_list(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
     Type *final_base = common_base ? common_base : base_expected;
     
-    // Prefer the inferred base if it provides more information than the expected base
-    if (base_expected && common_base) {
-        if (base_expected->kind == TYPE_ARRAY && !base_expected->as.array.size_known &&
-            common_base->kind == TYPE_ARRAY && common_base->as.array.size_known) {
-            final_base = common_base;
-        } else {
-            final_base = base_expected;
-        }
-    } else if (base_expected) {
-        final_base = base_expected;
-    }
-
     Type new_type = {0};
     new_type.kind = TYPE_ARRAY;
     new_type.as.array.base = final_base;
     new_type.as.array.size = elem_count;
-    new_type.as.array.size_known = true;
     
     InternResult *res = intern_type(ctx->store, &new_type);
     Type *concrete_type = (Type*)((Slice*)res->key)->ptr;
     
-    // Check if the initializer list is entirely composed of constant expressions
-    bool all_const = true;
+    // Check if the initializer list is entirely composed of constants safe for global init
+    bool all_llvm_const = true;
     for (size_t i = 0; i < elem_count; i++) {
         AstNode **node_ptr = (AstNode**)dynarray_get(list->elements, i);
         AstNode *node = *node_ptr;
-        if (!node->is_const_expr) {
-            all_const = false;
+        if (!node->is_llvm_const_safe) {
+            all_llvm_const = false;
             break;
         }
     }
-    expr->is_const_expr = all_const ? 1 : 0;
+    expr->is_foldable_const = 0; 
+    expr->is_llvm_const_safe = all_llvm_const ? 1 : 0;
 
     expr->type = concrete_type;
     return concrete_type;
 }
 
-Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
+/**
+ * Validates a structural instantiation (`Struct { field: value }`),
+ * ensuring all required fields are provided and correctly typed.
+ */
+static Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstStructLiteral *lit = &expr->data.struct_literal;
 
     Type *struct_type = NULL;
@@ -593,6 +762,8 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
         return NULL;
     }
 
+    bool all_llvm_const = true;
+
     // Check each field against its definition
     for (size_t i = 0; i < lit_field_count; i++) {
         AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, i);
@@ -600,7 +771,6 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
         for (size_t j = 0; j < defined_field_count; j++) {
             if (struct_type->as.struct_type.fields[j].name == init->name) {
                 def_field = &struct_type->as.struct_type.fields[j];
-                init->field_index = (int)j; // Store the resolved index for Codegen
                 break;
             }
         }
@@ -613,21 +783,29 @@ Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *expr, T
             return NULL;
         }
 
-        Type *actual_type = check_expression(ctx, scope, init->expr, def_field->type);
-        if (actual_type && actual_type != def_field->type) {
-            if (type_can_implicit_cast(def_field->type, actual_type)) {
-                insert_cast(ctx, init->expr, def_field->type);
-            } else {
-                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = init->expr->span, .filename = ctx->filename, .as.mismatch = { .expected = def_field->type, .actual = actual_type } };
-                dynarray_push_value(ctx->errors, &err);
-            }
+        if (check_expression(ctx, scope, init->expr, def_field->type)) {
+            coerce_or_error(ctx, init->expr, def_field->type);
+        }
+
+        if (!init->expr->is_llvm_const_safe) {
+            all_llvm_const = false;
         }
     }
+
+    expr->is_foldable_const = 0;
+    expr->is_llvm_const_safe = all_llvm_const ? 1 : 0;
 
     return struct_type;
 }
 
+// =============================================================================
+// SECTION 6: INTRINSICS
+// =============================================================================
 
+/**
+ * Validates compiler intrinsics (e.g. @alloc, @free), performing custom 
+ * type checking logic per-intrinsic since they often bypass normal rules.
+ */
 static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstNode *node = expr;
     IntrinsicKind kind = node->data.intrinsic.kind;
@@ -636,29 +814,53 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
     if (kind == INTRINSIC_ALLOC) {
         if (arg_count < 2 || arg_count > 3) {
             TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = node->span, .filename = ctx->filename };
-            err.as.arg_count.expected = 2; // simplified
+            err.as.arg_count.expected = 2; // expects 2 or 3, simplified
             err.as.arg_count.actual = arg_count;
             dynarray_push_value(ctx->errors, &err);
             return ctx->store->t_void_ptr;
         }
 
-        // 1. Check all arguments
-        for (size_t i = 0; i < arg_count; i++) {
-            AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
-            check_expression(ctx, scope, arg, NULL);
+        AstNode *type_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
+        AstNode *alloc_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 1);
+        AstNode *count_arg = arg_count == 3 ? *(AstNode**)dynarray_get(node->data.intrinsic.args, 2) : NULL;
+
+        // 1. Arg 0: Must be a type
+        Type *allocated_type = resolve_ast_type(ctx, scope, type_arg);
+        
+        if (allocated_type) {
+            type_arg->type = allocated_type;
+        } else {
+            // It couldn't be resolved as a type. Let's see what it evaluates to as an expression
+            // to provide a better error message.
+            Type *actual = check_expression(ctx, scope, type_arg, NULL);
+            TypeError err = { .kind = TE_EXPECTED_TYPE_ARG, .span = type_arg->span, .filename = ctx->filename };
+            err.as.mismatch.expected = NULL;
+            err.as.mismatch.actual = actual;
+            dynarray_push_value(ctx->errors, &err);
         }
 
-        // The first argument (if 3 args) or the inferred type (if 2 args)
-        AstNode *type_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
-        Type *allocated_type = NULL;
-        
-        if (type_arg->node_type == AST_TYPE) {
-            allocated_type = resolve_ast_type(ctx, scope, type_arg);
-            type_arg->type = allocated_type;
-        } else if (arg_count == 3) {
-             // If 3 args, 1st is type. If it's not a type node, it's an error.
-             TypeError err = { .kind = TE_TYPE_MISMATCH, .span = type_arg->span, .filename = ctx->filename };
-             dynarray_push_value(ctx->errors, &err);
+        // 2. Arg 1: Must be an allocator struct
+        Type *alloc_ty = check_expression(ctx, scope, alloc_arg, NULL);
+        if (alloc_ty) {
+            Type *underlying = alloc_ty;
+            if (underlying->kind == TYPE_POINTER) underlying = underlying->as.ptr.base;
+            if (underlying->kind != TYPE_STRUCT) {
+                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename };
+                err.as.mismatch.expected = ctx->store->t_void; // Just a placeholder for "expected struct"
+                err.as.mismatch.actual = alloc_ty;
+                dynarray_push_value(ctx->errors, &err);
+            }
+        }
+
+        // 3. Arg 2: Must be an integer if present
+        if (count_arg) {
+            Type *count_ty = check_expression(ctx, scope, count_arg, ctx->store->t_i64);
+            if (count_ty && !type_is_integer(count_ty)) {
+                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = count_arg->span, .filename = ctx->filename };
+                err.as.mismatch.expected = ctx->store->t_i64;
+                err.as.mismatch.actual = count_ty;
+                dynarray_push_value(ctx->errors, &err);
+            }
         }
 
         if (allocated_type) {
@@ -671,28 +873,52 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         return node->type;
     } 
     else if (kind == INTRINSIC_FREE) {
-        if (arg_count < 2 || arg_count > 3) {
+        if (arg_count != 2) {
             TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = node->span, .filename = ctx->filename };
             err.as.arg_count.expected = 2;
             err.as.arg_count.actual = arg_count;
             dynarray_push_value(ctx->errors, &err);
             return ctx->store->t_void;
         }
-        for (size_t i = 0; i < arg_count; i++) {
-            AstNode *arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, i);
-            check_expression(ctx, scope, arg, NULL);
+        
+        AstNode *alloc_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 0);
+        AstNode *ptr_arg = *(AstNode**)dynarray_get(node->data.intrinsic.args, 1);
+
+        // 1. Arg 0: Must be an allocator struct
+        Type *alloc_ty = check_expression(ctx, scope, alloc_arg, NULL);
+        if (alloc_ty) {
+            Type *underlying = alloc_ty;
+            if (underlying->kind == TYPE_POINTER) underlying = underlying->as.ptr.base;
+            if (underlying->kind != TYPE_STRUCT) {
+                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename };
+                err.as.mismatch.expected = ctx->store->t_void; 
+                err.as.mismatch.actual = alloc_ty;
+                dynarray_push_value(ctx->errors, &err);
+            }
         }
+
+        // 2. Arg 1: Must be a pointer
+        Type *ptr_ty = check_expression(ctx, scope, ptr_arg, NULL);
+        if (ptr_ty && ptr_ty->kind != TYPE_POINTER) {
+            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = ptr_arg->span, .filename = ctx->filename };
+            err.as.mismatch.expected = ctx->store->t_void_ptr; 
+            err.as.mismatch.actual = ptr_ty;
+            dynarray_push_value(ctx->errors, &err);
+        }
+
         return ctx->store->t_void;
     }
     
     return ctx->store->t_void;
 }
 
-// -----------------------------------------------------------------------------
-// Unary (Updated with Hint)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// SECTION 7: OPERATORS
+// =============================================================================
 
-
+/**
+ * Validates unary operations (-x, !x, *x, &x).
+ */
 Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstUnaryExpr *unary = &expr->data.unary_expr;
     
@@ -716,7 +942,7 @@ Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expe
                 dynarray_push_value(ctx->errors, &err);
                 return NULL; 
             }
-            if (unary->expr->is_const_expr) fold_unary_op(expr, unary->op, unary->expr);
+            if (unary->expr->is_foldable_const) fold_unary_op(expr, unary->op, unary->expr);
             return ctx->store->t_bool;
         case OP_SUB: 
             if (!type_is_numeric(operand_type)) { 
@@ -724,7 +950,7 @@ Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expe
                 dynarray_push_value(ctx->errors, &err);
                 return NULL; 
             }
-            if (unary->expr->is_const_expr) fold_unary_op(expr, unary->op, unary->expr);
+            if (unary->expr->is_foldable_const) fold_unary_op(expr, unary->op, unary->expr);
             return operand_type;
         case OP_ADRESS: 
             if (!is_lvalue_node(unary->expr)) { 
@@ -753,6 +979,10 @@ Type* check_unary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expe
     }
 }
 
+/**
+ * Validates binary operations (x + y, x == y, x && y), enforcing strict
+ * type consistency and applying literal inference.
+ */
 Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstBinaryExpr *bin = &expr->data.binary_expr;
     OpKind op = bin->op;
@@ -819,7 +1049,7 @@ Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *exp
         result_type = ctx->store->t_bool;
     }
 
-    if (bin->left->is_const_expr && bin->right->is_const_expr) {
+    if (bin->left->is_foldable_const && bin->right->is_foldable_const) {
         fold_binary_op(expr, op, bin->left, bin->right);
         // Correct const value type if needed (e.g. promoted in literal inference)
         if (result_type && type_is_float(result_type) && expr->const_value.type == INT_LITERAL) {
@@ -830,7 +1060,7 @@ Type* check_binary(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *exp
     return result_type;
 }
 
-Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
+static Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstMemberExpr *member_expr = &expr->data.member_expr;
     member_expr->symbol = NULL; // Reset
 
@@ -878,25 +1108,32 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     switch (underlying->kind) {
         
         case TYPE_ARRAY:
-            // O(1) Pointer comparison using our pre-interned keyword!
             if (member_expr->member == ctx->store->kw_len) {
-                
-                // If it's a fixed-size array, we do Zero-Cost Abstraction!
-                // Morph the node directly into an Integer Literal.
-                if (underlying->as.array.size_known) {
-                    expr->node_type = AST_LITERAL;
-                    expr->data.literal.type = INT_LITERAL;
-                    expr->data.literal.value.int_val = underlying->as.array.size;
-                    expr->is_const_expr = 1;
-                    expr->const_value.type = INT_LITERAL;
-                    expr->const_value.value.int_val = underlying->as.array.size;
-                    expr->type = ctx->store->t_i64;
-                    return ctx->store->t_i64;
-                }
-                
-                // If it's a dynamic slice (!size_known), it's evaluated at runtime.
-                member_expr->field_index = 1; // Index 1 is the 'len' in the { ptr, len } fat pointer struct
+                // Fixed-size array: Morph the node directly into an Integer Literal.
+                expr->node_type = AST_LITERAL;
+                expr->data.literal.type = INT_LITERAL;
+                expr->data.literal.value.int_val = underlying->as.array.size;
+                expr->is_foldable_const = 1;
+                expr->is_llvm_const_safe = 1;
+                expr->const_value.type = INT_LITERAL;
+                expr->const_value.value.int_val = underlying->as.array.size;
                 expr->type = ctx->store->t_i64;
+                return ctx->store->t_i64;
+            } else {
+                const char *field_name = "<unknown>";
+                if (member_expr->member && member_expr->member->key) {
+                    field_name = ((Slice*)member_expr->member->key)->ptr;
+                }
+                TypeError err = { .kind = TE_FIELD_ACCESS, .span = expr->span, .filename = ctx->filename };
+                err.as.field.name = field_name;
+                err.as.field.type = underlying;
+                dynarray_push_value(ctx->errors, &err);
+                return NULL;
+            }
+
+        case TYPE_SLICE:
+            if (member_expr->member == ctx->store->kw_len) {
+                // Slice: Index 1 is the 'len' in the { ptr, len } fat pointer struct
                 return ctx->store->t_i64;
             } else {
                 const char *field_name = "<unknown>";
@@ -914,7 +1151,6 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
             // Find the field
             for (size_t i = 0; i < underlying->as.struct_type.field_count; i++) {
                 if (underlying->as.struct_type.fields[i].name == member_expr->member) {
-                    member_expr->field_index = (int)i; // Save for Codegen
                     return underlying->as.struct_type.fields[i].type;
                 }
             }
@@ -939,7 +1175,7 @@ Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     }
 }
 
-Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
+static Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstCastExpr *cast = &expr->data.cast_expr;
     
     // Resolve the target type from the type node (if it's an explicit 'as' cast)
@@ -979,8 +1215,8 @@ Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     }
 
     // 5. Array -> Slice (Decay)
-    else if (src_type->kind == TYPE_ARRAY && cast->target_type->kind == TYPE_ARRAY && !cast->target_type->as.array.size_known) {
-        if (src_type->as.array.base == cast->target_type->as.array.base) {
+    else if (src_type->kind == TYPE_ARRAY && cast->target_type->kind == TYPE_SLICE) {
+        if (src_type->as.array.base == cast->target_type->as.slice.base) {
             valid = true;
         }
     }
@@ -997,8 +1233,9 @@ Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     }
 
     // Constant folding for casts
-    if (cast->expr->is_const_expr) {
-        expr->is_const_expr = 1;
+    if (cast->expr->is_foldable_const) {
+        expr->is_foldable_const = 1;
+        expr->is_llvm_const_safe = 1;
         expr->const_value = cast->expr->const_value;
         
         if (type_is_bool(src_type)) {
@@ -1026,7 +1263,8 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
     if (!expr) return NULL;
     
     Type *result_type = NULL;
-    expr->is_const_expr = 0; 
+    expr->is_foldable_const = 0; 
+    expr->is_llvm_const_safe = 0;
 
     switch (expr->node_type) {
         case AST_LITERAL:
@@ -1039,7 +1277,7 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
             result_type = check_call_expr(ctx, scope, expr);
             break;
         case AST_SUBSCRIPT_EXPR:
-            result_type = check_subscript(ctx, scope, expr);
+            result_type = check_subscript(ctx, scope, expr, expected_type);
             break;
         case AST_MEMBER_EXPR:
             result_type = check_member_expr(ctx, scope, expr);

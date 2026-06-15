@@ -15,7 +15,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
-#include <stdio.h>  // for debug prints
+#include <stdio.h>
 
 /* Initial token array capacity (used by dynarray as growth hint) */
 #define INITIAL_TOKEN_CAPACITY 256
@@ -189,7 +189,7 @@ static TokenType lexer_lex_number(Lexer *lexer, const char *start_ptr, const cha
              while (p < lexer->end && (isdigit((unsigned char)*p) || *p == '_')) p++;
         } else {
              // 10. (might be a member access on an integer literal if supported, or just 10.0)
-             // For now, if '.' is followed by non-digit, we stop.
+             // If '.' is followed by non-digit, stop.
              *out_end_ptr = p;
              return TOK_INT_LIT;
         }
@@ -373,7 +373,7 @@ Lexer* lexer_create_ex(const char *source, size_t source_len, Arena *arena,
 /* Destroy lexer */
 void lexer_destroy(Lexer *lexer) {
     if (!lexer) return;
-    // Note: We don't destroy interners here as they might be shared or arena-owned.
+    // Interners are not destroyed here as they might be shared or arena-owned.
     // They will be cleaned up when the arena is destroyed.
     if (lexer->tokens) {
         dynarray_free(lexer->tokens);
@@ -657,7 +657,7 @@ void lexer_reset(Lexer *lexer) {
         lexer->tokens->count = 0;
     }
 
-    /* Note: we intentionally do NOT clear interners/arena here so that
+    /* Interners/arena are intentionally NOT cleared here so that
        keywords and previously interned identifiers remain available. */
 }
 

@@ -26,14 +26,17 @@ TEST_CASE("Codegen: Loops") {
 }
 
 #define CODEGEN_EXIT(name, src, expected) \
-    TEST_CASE("Codegen/Complex/" name) { ASSERT_EQ_INT(test_run_and_get_exit_code(src), expected); return 1; }
-#include "complex_types.inc"
-#undef CODEGEN_EXIT
+    TEST_CASE("Codegen/" name) { ASSERT_EQ_INT(test_run_and_get_exit_code(src), expected); return 1; }
 
-#define CODEGEN_EXIT(name, src, expected) \
-    TEST_CASE("Codegen/Stress/" name) { ASSERT_EQ_INT(test_run_and_get_exit_code(src), expected); return 1; }
-#include "codegen_stress.inc"
-#include "more_codegen.inc"
-#include "deep_stress.inc"
-#include "abi_stress.inc"
+#include "codegen_abi.inc"
+#include "codegen_defer.inc"
+#include "codegen_alias.inc"
+#include "codegen_struct.inc"
+#include "codegen_pointers.inc"
+#include "codegen_loops.inc"
+#include "codegen_logic.inc"
+#include "codegen_casts.inc"
+#include "codegen_arrays.inc"
+#include "codegen_intrinsics.inc"
+
 #undef CODEGEN_EXIT

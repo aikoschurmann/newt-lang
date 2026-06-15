@@ -3,7 +3,7 @@
 static LLVMValueRef codegen_materialize_slice(CodegenContext *ctx, LLVMValueRef val, Type *src_type, Type *dst_type) {
     size_t n = src_type->as.array.size;
     Type *src_inner = src_type->as.array.base;
-    Type *dst_inner = dst_type->as.array.base;
+    Type *dst_inner = dst_type->as.slice.base;
     
     LLVMTypeRef dst_ty = get_llvm_type(ctx, dst_type);
     LLVMTypeRef i32_ty = LLVMInt32TypeInContext(ctx->context);
@@ -11,8 +11,7 @@ static LLVMValueRef codegen_materialize_slice(CodegenContext *ctx, LLVMValueRef 
 
     // Check if the inner array also needs casting to a slice
     bool inner_needs_deep_cast = 
-        src_inner->kind == TYPE_ARRAY && src_inner->as.array.size_known &&
-        dst_inner->kind == TYPE_ARRAY && !dst_inner->as.array.size_known;
+        src_inner->kind == TYPE_ARRAY && dst_inner->kind == TYPE_SLICE;
 
     if (!inner_needs_deep_cast) {
         // Base case (1D array): Just bitcast the pointer and pack it with length
@@ -77,8 +76,7 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
                 Type *src_base = cast_node->expr->type->as.ptr.base;
                 Type *dst_base = cast_node->target_type->as.ptr.base;
                 
-                if (src_base->kind == TYPE_ARRAY && dst_base->kind == TYPE_ARRAY &&
-                    src_base->as.array.size_known && !dst_base->as.array.size_known) {
+                if (src_base->kind == TYPE_ARRAY && dst_base->kind == TYPE_SLICE) {
                     
                     LLVMTypeRef slice_ty = get_llvm_type(ctx, dst_base);
                     LLVMValueRef slice_alloca = LLVMBuildAlloca(ctx->builder, slice_ty, "temp_slice_ptr_cast");
@@ -90,7 +88,7 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
                     LLVMBuildStore(ctx->builder, data_ptr, data_ptr_gep);
 
                     // 2. Length
-                    LLVMValueRef len = LLVMConstInt(LLVMInt64TypeInContext(ctx->context), src_base->as.array.size, 0);
+                    LLVMValueRef len = LLVMConstInt(LLVMInt64TypeInContext(ctx->context), (unsigned long long)src_base->as.array.size, 0);
                     LLVMValueRef len_gep = LLVMBuildStructGEP2(ctx->builder, slice_ty, slice_alloca, 1, "len_gep");
                     LLVMBuildStore(ctx->builder, len, len_gep);
 
@@ -99,11 +97,9 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
             }
         } else {
             // Special Case: Array to Slice (Fat Pointer)
-            if (cast_node->expr->type->kind == TYPE_ARRAY && cast_node->target_type->kind == TYPE_ARRAY) {
-                if (!cast_node->target_type->as.array.size_known && cast_node->expr->type->as.array.size_known) {
-                    // val is the pointer to the array (from codegen_expr_ident)
-                    return codegen_materialize_slice(ctx, val, cast_node->expr->type, cast_node->target_type);
-                }
+            if (cast_node->expr->type->kind == TYPE_ARRAY && cast_node->target_type->kind == TYPE_SLICE) {
+                // val is the pointer to the array (from codegen_expr_ident)
+                return codegen_materialize_slice(ctx, val, cast_node->expr->type, cast_node->target_type);
             }
 
             if (src_k == LLVMPointerTypeKind && dst_k == LLVMIntegerTypeKind)

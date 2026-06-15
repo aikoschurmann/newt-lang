@@ -1,0 +1,9 @@
+import std;
+fn main() -> i32 {
+    p: *i32 = @alloc(i32, std.heap.c_allocator, 1);
+    if (p == 0 as *i32) { return 1; }
+    *p = 100;
+    val: i32 = *p;
+    @free(std.heap.c_allocator, p);
+    return val;
+}

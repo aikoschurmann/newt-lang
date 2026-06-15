@@ -1,6 +1,7 @@
 #include "core/utils.h"
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -36,4 +37,32 @@ size_t get_peak_rss_kb(void) {
     getrusage(RUSAGE_SELF, &r);
     return (size_t)r.ru_maxrss / 1024;
 #endif
+}
+
+void *xmalloc(size_t size) {
+    void *p = malloc(size);
+    if (!p && size > 0) {
+        fprintf(stderr, "fatal: out of memory (malloc %zu bytes)\n", size);
+        abort();
+    }
+    return p;
+}
+
+void *xcalloc(size_t nmemb, size_t size) {
+    void *p = calloc(nmemb, size);
+    if (!p && nmemb > 0 && size > 0) {
+        fprintf(stderr, "fatal: out of memory (calloc %zu * %zu bytes)\n", nmemb, size);
+        abort();
+    }
+    return p;
+}
+
+char *xstrdup(const char *s) {
+    if (!s) return NULL;
+    char *p = strdup(s);
+    if (!p) {
+        fprintf(stderr, "fatal: out of memory (strdup)\n");
+        abort();
+    }
+    return p;
 }

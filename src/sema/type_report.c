@@ -59,6 +59,11 @@ void print_type_error(TypeError *err) {
         case TE_INCOMPLETE_TYPE:
              fprintf(stderr, "Incomplete type: '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
              break;
+        case TE_EXPECTED_TYPE_ARG:
+            fprintf(stderr, "Expected a type as argument, but found expression of type ");
+            print_type_quoted(stderr, err->as.mismatch.actual);
+            fprintf(stderr, ".\n");
+            break;
         case TE_REDECLARATION:
             fprintf(stderr, "Redefinition of symbol '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
             break;

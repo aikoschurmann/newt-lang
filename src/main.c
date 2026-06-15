@@ -10,6 +10,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "parse_statements.h"
+#include "parse_declarations.h"
 #include "ast.h"
 #include "arena.h"
 #include "type.h"
@@ -64,7 +65,7 @@ int main(int argc, char **argv) {
     ModuleLoader *loader = module_loader_create(arena, &opts, keywords, identifiers, strings);
 
     // Recursive Load
-    exit_code = load_module_recursive(loader, path, NULL, NULL);
+    exit_code = load_module_recursive(loader, path, NULL, NULL, 0);
     if (exit_code != EXIT_OK) goto cleanup;
 
     double t_load_end = now_seconds();
@@ -145,9 +146,19 @@ int main(int argc, char **argv) {
             if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
                 if (opts.verbose) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
                 if (opts.run_executable) {
-                    char run_cmd[512];
-                    snprintf(run_cmd, sizeof(run_cmd), "./%s", opts.output_name);
-                    system(run_cmd); 
+                    pid_t pid2 = fork();
+                    if (pid2 == 0) {
+                        char run_cmd[512];
+                        snprintf(run_cmd, sizeof(run_cmd), "./%s", opts.output_name);
+                        char *run_args[] = { run_cmd, NULL };
+                        execvp(run_cmd, run_args);
+                        perror("execvp");
+                        exit(1);
+                    } else if (pid2 > 0) {
+                        waitpid(pid2, NULL, 0);
+                    } else {
+                        fprintf(stderr, "Error: fork failed for execution\n");
+                    }
                 }
             } else {
                 fprintf(stderr, "Error: Linking failed\n");

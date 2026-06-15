@@ -1,6 +1,0 @@
-CODEGEN_EXIT("explicit_trunc", "fn main() -> i32 { a: i64 = 0xFFFFFFFF0000000A; b: i32 = a as i32; return b; }", 10)
-CODEGEN_EXIT("explicit_float_to_int", "fn main() -> i32 { a: f64 = 42.99; return a as i32; }", 42)
-CODEGEN_EXIT("linked_list_stress", "struct Node { val: i32; next: *Node; } fn main() -> i32 { n2: Node = Node{val: 20, next: 0 as *Node}; n1: Node = Node{val: 10, next: &n2}; return n1.next.val; }", 20)
-CODEGEN_EXIT("array_ptr_cast", "fn main() -> i32 { arr: i32[2] = {10, 20}; p: *i32 = &arr[0]; p2: *i64 = p as *i64; return 0; }", 0)
-CODEGEN_EXIT("const_chain", "const A: i32 = B + 1; const B: i32 = 10; fn main() -> i32 { return A; }", 11)
-CODEGEN_EXIT("struct_out_of_order", "struct S { a: i32; b: i32; } fn main() -> i32 { s: S = S{b: 2, a: 1}; return s.a * 10 + s.b; }", 12)

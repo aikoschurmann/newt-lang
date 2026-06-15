@@ -1,7 +1,0 @@
-SEMA_ERROR("mismatch_init", "fn main() { x: i32 = \"hi\"; }", TE_TYPE_MISMATCH)
-SEMA_ERROR("undeclared", "fn main() { x = 10; }", TE_UNDECLARED)
-SEMA_ERROR("redeclared", "fn main() { x: i32 = 1; x: i32 = 2; }", TE_REDECLARATION)
-SEMA_ERROR("binop_mismatch", "fn main() { a: i32 = 1; b: i64 = 2; c: i64 = a + b; }", TE_BINOP_MISMATCH)
-SEMA_ERROR("not_callable", "fn main() { x: i32 = 10; x(); }", TE_NOT_CALLABLE)
-SEMA_ERROR("arg_mismatch", "fn f(a: i32) {} fn main() { f(); }", TE_ARG_COUNT_MISMATCH)
-SEMA_ERROR("const_cycle", "const A: i32 = B; const B: i32 = A; fn main() { x: i32 = A; }", TE_RECURSIVE_CONST)

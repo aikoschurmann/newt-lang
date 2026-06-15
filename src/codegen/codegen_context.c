@@ -2,7 +2,7 @@
 #include "dynamic_array.h"
 
 CodegenMap* codegen_map_create(CodegenContext *ctx, CodegenMap *parent) {
-    CodegenMap *m = malloc(sizeof(CodegenMap));
+    CodegenMap *m = xmalloc(sizeof(CodegenMap));
     m->map = hashmap_create(8);
     m->parent = parent;
     return m;
@@ -27,7 +27,7 @@ LLVMValueRef codegen_map_get(CodegenMap *m, void *key) {
     return NULL;
 }
 CodegenContext* codegen_context_create(TypeStore *store, const char *module_name, int opt_level, ModuleLoader *loader) {
-    CodegenContext *ctx = malloc(sizeof(CodegenContext));
+    CodegenContext *ctx = xmalloc(sizeof(CodegenContext));
     ctx->store = store;
     ctx->context = LLVMContextCreate();
     ctx->module = LLVMModuleCreateWithNameInContext(module_name, ctx->context);
@@ -78,7 +78,7 @@ CodegenContext* codegen_context_create(TypeStore *store, const char *module_name
     ctx->opt_level = opt_level;
     ctx->current_func_type = NULL;
     ctx->sret_ptr = NULL;
-    ctx->deferred_actions = malloc(sizeof(DynArray));
+    ctx->deferred_actions = xmalloc(sizeof(DynArray));
     dynarray_init(ctx->deferred_actions, sizeof(AstNode*));
     ctx->loop_defer_count = 0;
     return ctx;

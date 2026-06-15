@@ -4,6 +4,7 @@
 #include "hash_map.h"
 #include "parsing/ast.h"
 #include "sema/type.h"
+#include "sema/type_utils.h"
 #include "core/error.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/Target.h>

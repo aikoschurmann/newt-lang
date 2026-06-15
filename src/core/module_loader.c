@@ -3,11 +3,14 @@
 #include "lexing/lexer.h"
 #include "parsing/parser.h"
 #include "parsing/parse_statements.h"
+#include "parsing/parse_declarations.h"
+#include "core/utils.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include <stdarg.h>
 
 #define EXIT_OK    0
 #define EXIT_USAGE 1
@@ -15,6 +18,60 @@
 #define EXIT_LEX   3
 #define EXIT_PARSE 4
 #define EXIT_TYPE  5
+
+#define MAX_RECURSION_DEPTH 256
+
+typedef struct {
+    char *buf;
+    size_t len;
+    size_t cap;
+    Arena *arena;
+} StrBuf;
+
+static void strbuf_init(StrBuf *sb, Arena *arena) {
+    sb->arena = arena;
+    sb->cap = 128;
+    sb->len = 0;
+    sb->buf = arena_alloc(arena, sb->cap);
+    sb->buf[0] = '\0';
+}
+
+static void strbuf_append(StrBuf *sb, const char *s) {
+    if (!s) return;
+    size_t slen = strlen(s);
+    if (sb->len + slen + 1 > sb->cap) {
+        size_t new_cap = sb->cap * 2;
+        while (sb->len + slen + 1 > new_cap) new_cap *= 2;
+        char *new_buf = arena_alloc(sb->arena, new_cap);
+        memcpy(new_buf, sb->buf, sb->len + 1);
+        sb->buf = new_buf;
+        sb->cap = new_cap;
+    }
+    memcpy(sb->buf + sb->len, s, slen);
+    sb->len += slen;
+    sb->buf[sb->len] = '\0';
+}
+
+static void strbuf_append_fmt(StrBuf *sb, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    char tmp[1024]; // Temporary buffer for formatted segment
+    int n = vsnprintf(tmp, sizeof(tmp), fmt, args);
+    va_end(args);
+    
+    if (n < 0) return;
+    if ((size_t)n < sizeof(tmp)) {
+        strbuf_append(sb, tmp);
+    } else {
+        // If 1KB isn't enough, allocate exact size
+        char *big_tmp = xmalloc(n + 1);
+        va_start(args, fmt);
+        vsnprintf(big_tmp, n + 1, fmt, args);
+        va_end(args);
+        strbuf_append(sb, big_tmp);
+        free(big_tmp);
+    }
+}
 
 ModuleLoader* module_loader_create(Arena *arena, Options *opts, 
                                    DenseArenaInterner *keywords, 
@@ -55,13 +112,19 @@ static bool file_exists(const char *path) {
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-int load_module_recursive(ModuleLoader *loader, const char *path, const char *logical_path, const char *importer_path) {
+int load_module_recursive(ModuleLoader *loader, const char *path, const char *logical_path, const char *importer_path, int depth) {
+    if (depth > MAX_RECURSION_DEPTH) {
+        fprintf(stderr, "Error: Maximum recursion depth (%d) exceeded while loading modules.\n", MAX_RECURSION_DEPTH);
+        return EXIT_IO;
+    }
+
     char *abs_path = get_absolute_path_real(loader->arena, path);
     if (!abs_path) {
         // Fallback for module.tn if path might be a directory
-        char fallback[1024];
-        snprintf(fallback, sizeof(fallback), "%s/module.tn", path);
-        abs_path = get_absolute_path_real(loader->arena, fallback);
+        StrBuf fallback_sb;
+        strbuf_init(&fallback_sb, loader->arena);
+        strbuf_append_fmt(&fallback_sb, "%s/module.tn", path);
+        abs_path = get_absolute_path_real(loader->arena, fallback_sb.buf);
         
         if (!abs_path) {
             if (importer_path) {
@@ -73,9 +136,9 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
         }
     }
     
-    // Set project root on first call
+    // Set project_root on first call
     if (!loader->project_root) {
-        char *dir = strdup(abs_path);
+        char *dir = xstrdup(abs_path);
         char *last_slash = strrchr(dir, '/');
         if (last_slash) *last_slash = '\0';
         loader->project_root = arena_alloc(loader->arena, strlen(dir) + 1);
@@ -145,15 +208,18 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
     AstProgram *module_prog = &module_ast->data.program;
     
     // Get directory of current module for relative resolution
-    char current_dir[1024];
+    StrBuf current_dir_sb;
+    strbuf_init(&current_dir_sb, loader->arena);
     const char *last_slash = strrchr(abs_path, '/');
     if (last_slash) {
         size_t len = (size_t)(last_slash - abs_path);
-        if (len >= sizeof(current_dir)) len = sizeof(current_dir) - 1;
-        memcpy(current_dir, abs_path, len);
-        current_dir[len] = '\0';
+        char *tmp = xmalloc(len + 1);
+        memcpy(tmp, abs_path, len);
+        tmp[len] = '\0';
+        strbuf_append(&current_dir_sb, tmp);
+        free(tmp);
     } else {
-        strcpy(current_dir, ".");
+        strbuf_append(&current_dir_sb, ".");
     }
 
     for (size_t i = 0; i < module_prog->decls->count; i++) {
@@ -162,77 +228,82 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
         if (decl->node_type == AST_IMPORT_DECLARATION) {
             AstImportDeclaration *imp = &decl->data.import_declaration;
             
-            char components_path[512] = {0};
-            char components_logical[512] = {0};
-            size_t cp_len = 0;
-            size_t cl_len = 0;
+            StrBuf cp_sb, cl_sb;
+            strbuf_init(&cp_sb, loader->arena);
+            strbuf_init(&cl_sb, loader->arena);
             
             for (size_t j = 0; j < imp->module_path->count; j++) {
                 InternResult *part = *(InternResult**)dynarray_get(imp->module_path, j);
                 Slice *s = (Slice*)part->key;
-                if (cp_len + s->len + 1 < sizeof(components_path)) {
-                    if (j > 0) components_path[cp_len++] = '/';
-                    memcpy(components_path + cp_len, s->ptr, s->len);
-                    cp_len += s->len;
-                }
-                if (cl_len + s->len + 1 < sizeof(components_logical)) {
-                    if (j > 0) components_logical[cl_len++] = '.';
-                    memcpy(components_logical + cl_len, s->ptr, s->len);
-                    cl_len += s->len;
-                }
+                if (j > 0) strbuf_append(&cp_sb, "/");
+                strbuf_append_fmt(&cp_sb, "%.*s", (int)s->len, s->ptr);
+                
+                if (j > 0) strbuf_append(&cl_sb, ".");
+                strbuf_append_fmt(&cl_sb, "%.*s", (int)s->len, s->ptr);
             }
-            components_path[cp_len] = '\0';
-            components_logical[cl_len] = '\0';
 
-            char mod_path_full[2048];
+            StrBuf mod_path_full_sb;
+            strbuf_init(&mod_path_full_sb, loader->arena);
             char *target_logical = NULL;
             
             if (imp->leading_dots > 0) {
                 // Relative Import
-                char base_dir[1024];
-                strcpy(base_dir, current_dir);
+                StrBuf base_dir_sb;
+                strbuf_init(&base_dir_sb, loader->arena);
+                strbuf_append(&base_dir_sb, current_dir_sb.buf);
                 
                 // For .. or more, go up
                 for (int d = 1; d < imp->leading_dots; d++) {
-                    char *up = strrchr(base_dir, '/');
-                    if (up) *up = '\0';
+                    char *up = strrchr(base_dir_sb.buf, '/');
+                    if (up) {
+                        *up = '\0';
+                        base_dir_sb.len = strlen(base_dir_sb.buf);
+                    }
                 }
                 
-                snprintf(mod_path_full, sizeof(mod_path_full), "%s/%s", base_dir, components_path);
+                strbuf_append_fmt(&mod_path_full_sb, "%s/%s", base_dir_sb.buf, cp_sb.buf);
 
                 // Target logical name: importer's logical path + components_logical
                 if (unit->logical_path) {
-                    size_t t_len = strlen(unit->logical_path) + cl_len + 2;
+                    size_t t_len = strlen(unit->logical_path) + cl_sb.len + 2;
                     target_logical = arena_alloc(loader->arena, t_len);
-                    snprintf(target_logical, t_len, "%s.%s", unit->logical_path, components_logical);
+                    snprintf(target_logical, t_len, "%s.%s", unit->logical_path, cl_sb.buf);
                 } else {
-                    target_logical = arena_alloc(loader->arena, cl_len + 1);
-                    strcpy(target_logical, components_logical);
+                    target_logical = arena_alloc(loader->arena, cl_sb.len + 1);
+                    strcpy(target_logical, cl_sb.buf);
                 }
             } else if (imp->is_root_relative) {
                 // Root-relative Import
-                snprintf(mod_path_full, sizeof(mod_path_full), "%s/%s", loader->project_root, components_path);
-                target_logical = arena_alloc(loader->arena, cl_len + 1);
-                strcpy(target_logical, components_logical);
+                strbuf_append_fmt(&mod_path_full_sb, "%s/%s", loader->project_root, cp_sb.buf);
+                target_logical = arena_alloc(loader->arena, cl_sb.len + 1);
+                strcpy(target_logical, cl_sb.buf);
             } else {
                 // Absolute (Library) Import
-                snprintf(mod_path_full, sizeof(mod_path_full), "%s/%s", loader->opts->stdlib_path, components_path);
-                target_logical = arena_alloc(loader->arena, cl_len + 1);
-                strcpy(target_logical, components_logical);
+                strbuf_append_fmt(&mod_path_full_sb, "%s/%s", loader->opts->stdlib_path, cp_sb.buf);
+                target_logical = arena_alloc(loader->arena, cl_sb.len + 1);
+                strcpy(target_logical, cl_sb.buf);
             }
 
             // Try .tn then /module.tn
-            char target_file[2100];
-            snprintf(target_file, sizeof(target_file), "%s.tn", mod_path_full);
+            StrBuf target_file_sb;
+            strbuf_init(&target_file_sb, loader->arena);
+            strbuf_append_fmt(&target_file_sb, "%s.tn", mod_path_full_sb.buf);
             
-            if (!file_exists(target_file)) {
-                 snprintf(target_file, sizeof(target_file), "%s/module.tn", mod_path_full);
+            if (!file_exists(target_file_sb.buf)) {
+                 target_file_sb.len = 0;
+                 target_file_sb.buf[0] = '\0';
+                 strbuf_append_fmt(&target_file_sb, "%s/module.tn", mod_path_full_sb.buf);
             }
             
-            int res = load_module_recursive(loader, target_file, target_logical, abs_path);
+            int res = load_module_recursive(loader, target_file_sb.buf, target_logical, abs_path, depth + 1);
             if (res == EXIT_OK) {
                 decl->data.import_declaration.resolved_logical_path = target_logical;
             } else {
+                // M-2: Cleanup before returning failure
+                hashmap_remove(loader->units, abs_path, str_hash, str_cmp, NULL, NULL);
+                if (logical_path) {
+                    hashmap_remove(loader->units_by_logical_path, (void*)logical_path, str_hash, str_cmp, NULL, NULL);
+                }
                 free(src);
                 return res;
             }

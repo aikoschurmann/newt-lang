@@ -12,7 +12,7 @@ CodegenContext* codegen_context_create(TypeStore *store, const char *module_name
 void codegen_context_destroy(CodegenContext *ctx);
 
 // Global initialization of LLVM targets. Should be called once at startup.
-void codegen_initialize();
+void codegen_initialize(void);
 
 // Generates LLVM IR for the program. Returns 0 on success.
 int codegen_program(CodegenContext *ctx);

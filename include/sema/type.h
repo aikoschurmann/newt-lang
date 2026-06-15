@@ -13,6 +13,7 @@ typedef enum {
     TYPE_PRIMITIVE, // i32, f64, bool, etc.
     TYPE_POINTER,
     TYPE_ARRAY,
+    TYPE_SLICE,
     TYPE_FUNCTION,
     TYPE_STRUCT,    // User defined
     TYPE_ENUM       // User defined (not yet implemented)
@@ -22,9 +23,7 @@ typedef enum {
     PRIM_I32, PRIM_I64,
     PRIM_F32, PRIM_F64,
     PRIM_BOOL,
-    PRIM_CHAR,
-    PRIM_VOID,
-    PRIM_STR
+    PRIM_CHAR
 } PrimitiveKind;
 
 typedef struct StructField {
@@ -49,8 +48,12 @@ struct Type {
         struct {
             Type *base;
             int64_t size;     // Count of elements
-            bool size_known;  // false for type[]
         } array;
+
+        // TYPE_SLICE
+        struct {
+            Type *base;
+        } slice;
 
         // TYPE_FUNCTION
         struct {

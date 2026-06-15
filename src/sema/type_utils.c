@@ -27,9 +27,7 @@ bool type_is_char(Type *t) {
 }
 
 bool type_is_void(Type *t) {
-    if (!t) return false;
-    if (t->kind != TYPE_PRIMITIVE) return false;
-    return t->as.primitive == PRIM_VOID;
+    return t && t->kind == TYPE_VOID;
 }
 
 bool type_is_pointer_to_void(Type *t) {
@@ -39,9 +37,7 @@ bool type_is_pointer_to_void(Type *t) {
 
 bool type_is_pointer_like(Type *t) {
     if (!t) return false;
-    if (t->kind == TYPE_POINTER) return true;
-    if (t->kind == TYPE_PRIMITIVE && t->as.primitive == PRIM_STR) return true;
-    return false;
+    return (t->kind == TYPE_POINTER);
 }
 
 bool type_is_numeric(Type *t) {
@@ -63,7 +59,7 @@ bool type_can_implicit_cast(Type *target, Type *source) {
         if (s == PRIM_F32 && t == PRIM_F64) return true;
         // i32 -> f64 (Exact in 53-bit mantissa)
         if (s == PRIM_I32 && t == PRIM_F64) return true;
-        
+
         // NOTE: i64 -> f64 is NOT implicit (precision loss for large values)
         // NOTE: i32 -> f32 is NOT implicit (precision loss for large values)
         // NOTE: No narrowing (i64 -> i32) is implicit.
@@ -71,10 +67,8 @@ bool type_can_implicit_cast(Type *target, Type *source) {
 
     // 2. Array Decay (T[N] -> T[])
     // Tightened: base types must be IDENTICAL, no recursive implicit casting.
-    if (target->kind == TYPE_ARRAY && source->kind == TYPE_ARRAY) {
-        if (!target->as.array.size_known) {
-            return target->as.array.base == source->as.array.base;
-        }
+    if (target->kind == TYPE_SLICE && source->kind == TYPE_ARRAY) {
+        return target->as.slice.base == source->as.array.base;
     }
 
     // 3. Pointer Relaxation
@@ -85,14 +79,14 @@ bool type_can_implicit_cast(Type *target, Type *source) {
         // Tightened: T[N]* -> T[]* only if T is identical
         Type *sb = source->as.ptr.base;
         Type *tb = target->as.ptr.base;
-        if (sb->kind == TYPE_ARRAY && tb->kind == TYPE_ARRAY && !tb->as.array.size_known) {
-             return tb->as.array.base == sb->as.array.base;
+        if (sb->kind == TYPE_ARRAY && tb->kind == TYPE_SLICE) {
+             return tb->as.slice.base == sb->as.array.base;
         }
     }
 
-    // 4. String decay: str -> *char
-    if (target->kind == TYPE_POINTER && source->kind == TYPE_PRIMITIVE && source->as.primitive == PRIM_STR) {
-        return type_is_char(target->as.ptr.base);
+    // 4. Array to Pointer Decay (T[N] -> *T)
+    if (target->kind == TYPE_POINTER && source->kind == TYPE_ARRAY) {
+        return target->as.ptr.base == source->as.array.base;
     }
 
     return false;

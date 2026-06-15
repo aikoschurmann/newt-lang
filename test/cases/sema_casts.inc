@@ -1,3 +1,5 @@
+// test/cases/sema_casts.inc
+
 // Implicit Valid
 SEMA_VALID("implicit_i32_i64", "fn main() { a: i32 = 10; b: i64 = a; }")
 SEMA_VALID("implicit_f32_f64", "fn main() { a: f32 = 1.0; b: f64 = a; }")

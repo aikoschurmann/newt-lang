@@ -200,12 +200,11 @@ typedef struct { AstNode *expr; OpKind op; } AstPostfixExpr;
 typedef struct { AstNode *lvalue; AstNode *rvalue; OpKind op; } AstAssignmentExpr;
 typedef struct { AstNode *callee; DynArray *args; } AstCallExpr;
 typedef struct { AstNode *target; AstNode *index; } AstSubscriptExpr;
-typedef struct { AstNode *target; InternResult *member; int field_index; Symbol *symbol; } AstMemberExpr;
+typedef struct { AstNode *target; InternResult *member; Symbol *symbol; } AstMemberExpr;
 
 typedef struct {
     InternResult *name; // The field name
     AstNode *expr;      // Field initialization expression
-    int field_index;    // Resolved at Sema, used by Codegen
 } AstFieldInit;
 
 typedef struct {
@@ -272,7 +271,8 @@ struct AstNode {
     int last_checked_pass; // For multi-pass tracking
 
     /* constant folding / evaluation helper: inline value to avoid small allocations */
-    int is_const_expr;       /* boolean: 0 or 1 */
+    uint8_t is_foldable_const;  /* safe for constant folding (primitives only) */
+    uint8_t is_llvm_const_safe; /* safe as LLVM global initializer */
     ConstValue const_value;  /* can still be used for non-const expressions, constant folding will set this */
 
     union {

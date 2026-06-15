@@ -35,5 +35,5 @@ ModuleLoader* module_loader_create(Arena *arena, Options *opts,
                                    DenseArenaInterner *identifiers, 
                                    DenseArenaInterner *strings);
 
-int load_module_recursive(ModuleLoader *loader, const char *path, const char *logical_path, const char *importer_path);
+int load_module_recursive(ModuleLoader *loader, const char *path, const char *logical_path, const char *importer_path, int depth);
 CompilationUnit* module_loader_get_unit(ModuleLoader *loader, const char *path);

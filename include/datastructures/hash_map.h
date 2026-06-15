@@ -3,21 +3,11 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "dynamic_array.h"
+#include "core/utils.h"
 
 /* -----------------------------
    HashMap API (separate chaining)
    ----------------------------- */
-
-/* Standard pointer identity hash/cmp for when keys are local pointers */
-static inline size_t ptr_hash(void *key) { 
-    // Shift right to remove alignment zeros (usually 3 or 4 bits)
-    // and mix slightly to avoid collisions in low buckets
-    size_t k = (size_t)key;
-    return (k >> 4) ^ (k >> 9);
-}
-static inline int ptr_cmp(void *a, void *b) {
-    return (a > b) - (a < b);
-}
 
 typedef struct {
     void *key;
@@ -81,3 +71,4 @@ void hashmap_foreach(
     HashMap* map,
     void (*func)(void* key, void* value)
 );
+

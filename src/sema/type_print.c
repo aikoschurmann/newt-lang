@@ -1,143 +1,120 @@
-#include "type_print.h"
-#include "type.h"
-#include "ast.h"         // for AstNode
-#include "dense_arena_interner.h" 
-#include "dynamic_array.h"
+#include "sema/type_print.h"
+#include "sema/type.h"
+#include "parsing/ast.h"
+#include <stdio.h>
 #include <string.h>
 
 #define RESET   "\033[0m"
 #define BOLD    "\033[1m"
 #define DIM     "\033[2m"
+#define RED     "\033[31m"
+#define GREEN   "\033[32m"
+#define YELLOW  "\033[33m"
+#define BLUE    "\033[34m"
+#define MAGENTA "\033[35m"
+#define CYAN    "\033[36m"
 
-// Detailed Syntax Highlighting
-#define COL_PRIM    RESET        // White
-#define COL_PTR     "\033[31m"   // Red
-#define COL_ARR     "\033[33m"   // Yellow
-#define COL_NUM     RESET        // White
-#define COL_FUNC    RESET        // White/Default for punctuators
-#define COL_STRUCT  RESET        // White
-#define COL_KEYWORD RESET        // White
-#define COL_INDEX   "\033[33m"   // Yellow for [0], [1]
-#define COL_KIND_PRIM "\033[34m" // Blue for (primitive)
-#define COL_KIND_PTR  "\033[31m" // Red for (pointer)
-#define COL_KIND_ARR  "\033[33m" // Yellow for (array)
-#define COL_KIND_FUNC "\033[35m" // Magenta for (function)
-#define COL_KIND_OTHER "\033[2m" // Dim for others
+#define COL_KIND_PRIMITIVE CYAN
+#define COL_KIND_POINTER   YELLOW
+#define COL_KIND_ARRAY     GREEN
+#define COL_KIND_SLICE     BLUE
+#define COL_KIND_STRUCT    MAGENTA
+#define COL_KIND_FUNCTION  RED
+#define COL_KIND_OTHER     DIM
+#define COL_INDEX          DIM
+#define COL_PTR            MAGENTA
+#define COL_NUM            YELLOW
 
-
-static const char* get_primitive_name(PrimitiveKind kind) {
-    switch (kind) {
-        case PRIM_I32:  return "i32";
-        case PRIM_I64:  return "i64";
-        case PRIM_F32:  return "f32";
-        case PRIM_F64:  return "f64";
-        case PRIM_BOOL: return "bool";
-        case PRIM_CHAR: return "char";
-        case PRIM_STR:  return "str";
-        case PRIM_VOID: return "void";
-        default:        return "unknown_prim";
+static void type_print_internal(FILE *out, const Type *type) {
+    if (!type) {
+        fprintf(out, "null");
+        return;
     }
-}
-
-// Recursive implementation
-static void type_print_internal(FILE *f, const Type *type) {
-    if (!type) { fprintf(f, "null"); return; }
 
     switch (type->kind) {
-        case TYPE_PRIMITIVE:
-            fprintf(f, "%s", get_primitive_name(type->as.primitive));
+        case TYPE_VOID: fprintf(out, "void"); break;
+        case TYPE_PRIMITIVE: {
+            switch (type->as.primitive) {
+                case PRIM_I32:  fprintf(out, "i32"); break;
+                case PRIM_I64:  fprintf(out, "i64"); break;
+                case PRIM_F32:  fprintf(out, "f32"); break;
+                case PRIM_F64:  fprintf(out, "f64"); break;
+                case PRIM_BOOL: fprintf(out, "bool"); break;
+                case PRIM_CHAR: fprintf(out, "char"); break;
+            }
             break;
-
+        }
         case TYPE_POINTER: {
-            int needs_parens = (type->as.ptr.base->kind == TYPE_FUNCTION);
-            
-            if (needs_parens) fprintf(f, "(");
-            type_print_internal(f, type->as.ptr.base);
-            if (needs_parens) fprintf(f, ")");
-            
-            fprintf(f, "*");
+            fprintf(out, "*");
+            type_print_internal(out, type->as.ptr.base);
             break;
         }
-
-        case TYPE_ARRAY: { 
-            int needs_parens = (type->as.array.base->kind == TYPE_FUNCTION);
-
-            if (needs_parens) fprintf(f, "(");
-            type_print_internal(f, type->as.array.base);
-            if (needs_parens) fprintf(f, ")");
-
-            fprintf(f, "[");
-            if (type->as.array.size_known) {
-                fprintf(f, "%lld", (long long)type->as.array.size);
-            }
-            fprintf(f, "]");
+        case TYPE_ARRAY: {
+            fprintf(out, "[%lld]", (long long)type->as.array.size);
+            type_print_internal(out, type->as.array.base);
             break;
         }
-            
-        case TYPE_FUNCTION:
-            fprintf(f, "(");
-            for (size_t i = 0; i < type->as.func.param_count; i++) {
-                if (i > 0) fprintf(f, ", ");
-                type_print_internal(f, type->as.func.params[i]);
-            }
-
-            fprintf(f, ") -> ");
-            if (type->as.func.return_type) {
-                type_print_internal(f, type->as.func.return_type);
-            } else {
-                fprintf(f, "err");
-            }
+        case TYPE_SLICE: {
+            fprintf(out, "[]");
+            type_print_internal(out, type->as.slice.base);
             break;
-
+        }
         case TYPE_STRUCT: {
-             const char *name = "anonymous";
-             if (type->as.struct_type.name && type->as.struct_type.name->key) {
-                 name = ((Slice*)type->as.struct_type.name->key)->ptr;
-             }
-             fprintf(f, "struct %s", name);
+            if (type->as.struct_type.name && type->as.struct_type.name->key) {
+                Slice *s = (Slice*)type->as.struct_type.name->key;
+                fprintf(out, "%.*s", (int)s->len, s->ptr);
+            } else {
+                fprintf(out, "struct");
+            }
+            break;
+        }
+        case TYPE_FUNCTION: {
+            fprintf(out, "fn(");
+            for (size_t i = 0; i < type->as.func.param_count; i++) {
+                if (i > 0) fprintf(out, ", ");
+                type_print_internal(out, type->as.func.params[i]);
+            }
+            fprintf(out, ") -> ");
+            type_print_internal(out, type->as.func.return_type);
+            break;
+        }
+        case TYPE_ENUM: {
+             fprintf(out, "enum");
              break;
         }
-        
-        default:
-            fprintf(f, "unknown");
-            break;
     }
 }
 
-void type_print(FILE *f, const Type *type) {
-    type_print_internal(f, type);
+void type_print(FILE *out, const Type *type) {
+    type_print_internal(out, type);
 }
 
-void type_print_signature(const Type *type) {
-    type_print_internal(stdout, type);
-}
-
-// ----------------------------------------------------------------------------
-// Dump Routines
-// ----------------------------------------------------------------------------
-
-// Internal helper for usage of "Interned Types" listing
 static const char* get_kind_name(const Type *type) {
-    if (!type) return "unknown";
+    if (!type) return "NULL";
     switch (type->kind) {
-        case TYPE_PRIMITIVE: return "primitive";
-        case TYPE_POINTER:   return "pointer";
-        case TYPE_ARRAY:     return "array";
-        case TYPE_FUNCTION:  return "function";
-        case TYPE_STRUCT:    return "struct";
-        default:             return "unknown";
+        case TYPE_VOID:      return "Void";
+        case TYPE_PRIMITIVE: return "Primitive";
+        case TYPE_POINTER:   return "Pointer";
+        case TYPE_ARRAY:     return "Array";
+        case TYPE_SLICE:     return "Slice";
+        case TYPE_STRUCT:    return "Struct";
+        case TYPE_FUNCTION:  return "Function";
+        case TYPE_ENUM:      return "Enum";
+        default:             return "Unknown";
     }
 }
 
-// Internal helper for usage of "Interned Types" listing
 static const char* get_kind_color(const Type *type) {
     if (!type) return RESET;
     switch (type->kind) {
-        case TYPE_PRIMITIVE: return COL_KIND_PRIM;
-        case TYPE_POINTER:   return COL_KIND_PTR;
-        case TYPE_ARRAY:     return COL_KIND_ARR;
-        case TYPE_FUNCTION:  return COL_KIND_FUNC;
-        case TYPE_STRUCT:    return COL_STRUCT;
+        case TYPE_VOID:      return COL_KIND_OTHER;
+        case TYPE_PRIMITIVE: return COL_KIND_PRIMITIVE;
+        case TYPE_POINTER:   return COL_KIND_POINTER;
+        case TYPE_ARRAY:     return COL_KIND_ARRAY;
+        case TYPE_SLICE:     return COL_KIND_SLICE;
+        case TYPE_STRUCT:    return COL_KIND_STRUCT;
+        case TYPE_FUNCTION:  return COL_KIND_FUNCTION;
+        case TYPE_ENUM:      return COL_KIND_OTHER;
         default:             return COL_KIND_OTHER;
     }
 }
@@ -165,7 +142,7 @@ static void print_interned_type_header(int index_width) {
         index_col_width, "Index", "Kind", "Type");
 }
 
-static void print_interned_type_line(int index, int index_width, Type *type) {
+static void print_interned_type_line(int index, int index_width, const Type *type) {
     int index_col_width = index_width + 2;
     if (index_col_width < 5) index_col_width = 5;
     

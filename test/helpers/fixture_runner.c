@@ -19,7 +19,7 @@ static int run_single_fixture(const char *dir_path, const char *name) {
     char main_path[512];
     snprintf(main_path, sizeof(main_path), "%s/main.tn", dir_path);
     
-    int load_res = load_module_recursive(loader, main_path, NULL, NULL);
+    int load_res = load_module_recursive(loader, main_path, NULL, NULL, 0);
     if (load_res != 0) {
         test_log("      %s✗%s %-30s (Load failed: %d)\n", COL_RED, COL_RESET, name, load_res);
         arena_destroy(arena);

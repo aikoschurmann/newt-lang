@@ -1,0 +1,2 @@
+import std;
+fn main() { p: *i32 = @alloc(10, std.heap.c_allocator, 1); }
