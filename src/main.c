@@ -6,30 +6,23 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#include "file.h"
-#include "lexer.h"
-#include "parser.h"
-#include "parse_statements.h"
-#include "parse_declarations.h"
-#include "ast.h"
-#include "arena.h"
-#include "type.h"
-#include "typecheck.h"
-#include "type_print.h"
-#include "scope.h"
-#include "cli.h"
-#include "metrics.h"
-#include "utils.h"
-#include "codegen.h"
-#include "module_loader.h"
-
-// Exit codes
-#define EXIT_OK    0
-#define EXIT_USAGE 1
-#define EXIT_IO    2
-#define EXIT_LEX   3
-#define EXIT_PARSE 4
-#define EXIT_TYPE  5
+#include "core/file.h"
+#include "lexing/lexer.h"
+#include "parsing/parser.h"
+#include "parsing/parse_statements.h"
+#include "parsing/parse_declarations.h"
+#include "parsing/ast.h"
+#include "datastructures/arena.h"
+#include "sema/type.h"
+#include "sema/typecheck.h"
+#include "sema/type_print.h"
+#include "datastructures/scope.h"
+#include "cli/cli.h"
+#include "cli/metrics.h"
+#include "core/utils.h"
+#include "codegen/codegen.h"
+#include "core/module_loader.h"
+#include "core/exit_codes.h"
 
 int main(int argc, char **argv) {
     codegen_initialize();
@@ -132,32 +125,35 @@ int main(int argc, char **argv) {
     if (codegen_program(cg_ctx) == 0) {
         if (opts.print_ir) codegen_dump_module(cg_ctx);
 
-        char obj_path[256];
-        snprintf(obj_path, sizeof(obj_path), "%s.o", opts.output_name);
+        size_t obj_path_len = strlen(opts.output_name) + 4;
+        char *obj_path = arena_alloc(arena, obj_path_len);
+        snprintf(obj_path, obj_path_len, "%s.o", opts.output_name);
         codegen_emit_object(cg_ctx, obj_path);
         
         if (opts.verbose) printf("Linking...\n");
 
+        char *runtime_path = get_runtime_path();
         pid_t pid = fork();
         if (pid == 0) {
-            // Child process: try to link with runtime, fallback to simple link
-            char *args[] = {"cc", obj_path, "src/core/runtime.c", "-o", (char*)opts.output_name, NULL};
+            // Child process: link with runtime
+            char *args[] = {"cc", obj_path, runtime_path, "-o", (char*)opts.output_name, NULL};
             execvp("cc", args);
             
-            // If execvp returns, it failed. Try without runtime.
-            char *fallback_args[] = {"cc", obj_path, "-o", (char*)opts.output_name, NULL};
-            execvp("cc", fallback_args);
+            // If execvp returns, it failed to start cc
+            perror("execvp");
             exit(1);
         } else if (pid > 0) {
             int status;
             waitpid(pid, &status, 0);
+            free(runtime_path);
             if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
                 if (opts.verbose) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
                 if (opts.run_executable) {
                     pid_t pid2 = fork();
                     if (pid2 == 0) {
-                        char run_cmd[512];
-                        snprintf(run_cmd, sizeof(run_cmd), "./%s", opts.output_name);
+                        size_t run_cmd_len = strlen(opts.output_name) + 3;
+                        char *run_cmd = arena_alloc(arena, run_cmd_len);
+                        snprintf(run_cmd, run_cmd_len, "./%s", opts.output_name);
                         char *run_args[] = { run_cmd, NULL };
                         execvp(run_cmd, run_args);
                         perror("execvp");

@@ -1,38 +1,41 @@
 #include "file.h"
 #include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 char *read_file(const char *filename) {
-    FILE *file = fopen(filename, "rb");  // Open in binary mode
-    if (!file) {
-        perror("fopen");
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        perror("open");
         return NULL;
     }
 
-    fseek(file, 0, SEEK_END);
-    long length = ftell(file);  // Get file size
-    if (length < 0) {
-        perror("ftell");
-        fclose(file);
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        perror("fstat");
+        close(fd);
         return NULL;
     }
-    rewind(file);
 
+    size_t length = (size_t)st.st_size;
     char *buffer = malloc(length + 1);
     if (!buffer) {
         perror("malloc");
-        fclose(file);
+        close(fd);
         return NULL;
     }
 
-    if (fread(buffer, 1, length, file) != (size_t)length) {
-        perror("fread");
+    ssize_t bytes_read = read(fd, buffer, length);
+    if (bytes_read < 0 || (size_t)bytes_read != length) {
+        perror("read");
         free(buffer);
-        fclose(file);
+        close(fd);
         return NULL;
     }
 
     buffer[length] = '\0';  // Null-terminate the string
-    fclose(file);
+    close(fd);
     return buffer;
 }
 

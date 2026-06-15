@@ -5,19 +5,13 @@
 #include "parsing/parse_statements.h"
 #include "parsing/parse_declarations.h"
 #include "core/utils.h"
+#include "core/exit_codes.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <stdarg.h>
-
-#define EXIT_OK    0
-#define EXIT_USAGE 1
-#define EXIT_IO    2
-#define EXIT_LEX   3
-#define EXIT_PARSE 4
-#define EXIT_TYPE  5
 
 #define MAX_RECURSION_DEPTH 256
 
@@ -84,8 +78,8 @@ ModuleLoader* module_loader_create(Arena *arena, Options *opts,
     loader->identifiers = identifiers;
     loader->strings = strings;
     
-    loader->units = hashmap_create(16);
-    loader->units_by_logical_path = hashmap_create(16);
+    loader->units = hashmap_create(64);
+    loader->units_by_logical_path = hashmap_create(64);
     loader->units_ordered = arena_alloc(arena, sizeof(DynArray));
     dynarray_init_in_arena(loader->units_ordered, arena, sizeof(CompilationUnit*), 8);
     
@@ -160,18 +154,20 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
     if (loader->opts->verbose) printf("Loading module: %s\n", abs_path);
 
     // 2. Read Source
-    char *src = read_file(abs_path);
-    if (!src) {
+    char *raw_src = read_file(abs_path);
+    if (!raw_src) {
         fprintf(stderr, "Error: Failed to read file: %s\n", abs_path);
         return EXIT_IO;
     }
-    size_t src_len = strlen(src);
+    size_t src_len = strlen(raw_src);
+    char *src = arena_alloc(loader->arena, src_len + 1);
+    memcpy(src, raw_src, src_len + 1);
+    free(raw_src);
 
     // 3. Lexing (Shared Interners)
     Lexer *lexer = lexer_create_ex(src, src_len, loader->arena, loader->keywords, loader->identifiers, loader->strings);
     if (!lexer_lex_all(lexer)) {
         fprintf(stderr, "Error: Lexing failed for %s\n", abs_path);
-        free(src);
         return EXIT_LEX;
     }
 
@@ -181,12 +177,10 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
     AstNode *module_ast = parse_program(parser, &parse_err);
     if (parse_err.message) {
         print_parse_error(&parse_err);
-        free(src);
         return EXIT_PARSE;
     }
 
     if (!module_ast) {
-        free(src);
         return EXIT_OK;
     }
 
@@ -304,7 +298,7 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
                 if (logical_path) {
                     hashmap_remove(loader->units_by_logical_path, (void*)logical_path, str_hash, str_cmp, NULL, NULL);
                 }
-                free(src);
+                
                 return res;
             }
         }
@@ -312,6 +306,6 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
 
     dynarray_push_value(loader->units_ordered, &unit);
 
-    free(src);
+    
     return EXIT_OK;
 }

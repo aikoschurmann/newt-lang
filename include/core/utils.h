@@ -72,3 +72,5 @@ size_t get_peak_rss_kb(void);
 void *xmalloc(size_t size);
 void *xcalloc(size_t nmemb, size_t size);
 char *xstrdup(const char *s);
+
+char *get_runtime_path(void);
