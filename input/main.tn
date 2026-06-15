@@ -1,60 +1,53 @@
 import std;
 
 alias Allocator = std.mem.Allocator;
+alias Arena = std.arena.Arena;
 
 pub struct Node {
     val: i32;
     next: *Node;
 }
 
-fn main() -> i64 {
-    a: Allocator = std.heap.c_allocator;
+fn main() -> i32 {
+    arena: Arena = Arena.new(std.heap.allocator, 1024);
+    defer { arena.destroy(); }
+
+    a: Allocator = arena.get_allocator();
 
     head: *Node = null;
-    curr: *Node = null;
+    tail: *Node = null;
 
-    for (i: i32 = 1; i <= 5; i = i + 1) {
+    // 1. Build the linked list
+    for (i: i32 = 1; i <= 5; i += 1) {
         node: *Node = @alloc(Node, a, 1);
+        if node == null {
+            print("Allocation failed!\n");
+            return 1;
+        }
+        
         node.val = i * 10;
         node.next = null;
 
         if head == null {
             head = node;
-            curr = node;
         } else {
-            curr.next = node;
-            curr = node;
+            tail.next = node;
         }
+        tail = node;
     }
 
+    // 2. Traverse the list and process values
     total: f64 = 0.0;
+    curr: *Node = head;
     
-    print("Processing heap LL:\n");
-
-    curr = head;
     while curr != null {
-        sqr_val: f64 = (curr.val * curr.val) as f64;
+        sqr: f64 = (curr.val * curr.val) as f64;
+        println(sqr);
         
-        println(sqr_val);
-        total = total + sqr_val;
-        
+        total += sqr;
         curr = curr.next;
     }
     
-    print("Total accumulated sqr: ", total,  "\n");
-
-    free_list(a, head);
-    
+    print("Total accumulated sqr: ", total, "\n");
     return 0;
-}
-
-// Recursive function to clear the heap memory
-fn free_list(a: std.mem.Allocator, n: *Node) {
-    if n == null {
-        return;
-    }
-    
-    next_node: *Node = n.next;
-    @free(a, n);
-    free_list(a, next_node);
 }

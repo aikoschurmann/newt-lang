@@ -1,16 +1,16 @@
 import std.libc;
 import std.mem;
 
-pub fn c_alloc_impl(ctx: *void, size: i64) -> *void {
+fn heap_alloc_impl(_ctx: *void, size: i64) -> *void {
     return std.libc.malloc(size);
 }
 
-pub fn c_free_impl(ctx: *void, ptr: *void) -> void {
+fn heap_free_impl(_ctx: *void, ptr: *void) -> void {
     std.libc.free(ptr);
 }
 
-pub const c_allocator: std.mem.Allocator = std.mem.Allocator {
+pub const allocator: std.mem.Allocator = std.mem.Allocator {
     ctx: null,
-    alloc: c_alloc_impl,
-    free: c_free_impl
+    _alloc: heap_alloc_impl,
+    _free: heap_free_impl
 };
