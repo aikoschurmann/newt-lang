@@ -1,8 +1,44 @@
 @link("malloc")
 pub fn malloc(size: i64) -> *void;
 
+@link("calloc")
+pub fn calloc(count: i64, size: i64) -> *void;
+
+@link("realloc")
+pub fn realloc(ptr: *void, size: i64) -> *void;
+
 @link("free")
 pub fn free(ptr: *void) -> void;
 
 @link("printf")
 pub fn printf(fmt: *char) -> i32;
+
+@link("strlen")
+pub fn strlen(s: *char) -> i64;
+
+@link("memcpy")
+pub fn memcpy(dst: *void, src: *void, n: i64) -> *void;
+
+@link("memset")
+pub fn memset(dst: *void, val: i32, n: i64) -> *void;
+
+@link("memcmp")
+pub fn memcmp(a: *void, b: *void, n: i64) -> i32;
+
+@link("exit")
+pub fn exit(code: i32) -> void;
+
+@link("abort")
+pub fn abort() -> void;
+
+// mmap constants (Darwin)
+pub const PROT_READ: i32 = 1;
+pub const PROT_WRITE: i32 = 2;
+pub const MAP_PRIVATE: i32 = 2;
+pub const MAP_ANON: i32 = 4096;
+
+@link("mmap")
+pub fn mmap(addr: *void, len: i64, prot: i32, flags: i32, fd: i32, offset: i64) -> *void;
+
+@link("munmap")
+pub fn munmap(addr: *void, len: i64) -> i32;

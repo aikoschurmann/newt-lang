@@ -3,3 +3,6 @@ pub import .mem;
 pub import .heap;
 pub import .io;
 pub import .arena;
+pub import .fixed_arena;
+pub import .math;
+pub import .string;

@@ -7,25 +7,16 @@ pub struct Arena {
     backing_allocator: std.mem.Allocator;
 }
 
-pub fn arena_alloc_impl(ctx: *void, size: i64) -> *void {
+fn arena_alloc_impl(ctx: *void, size: i64) -> *void {
     arena: *Arena = ctx as *Arena;
-    
-    // Check for Out-Of-Memory
-    if (arena.offset + size) > arena.capacity {
-        return null; 
-    }
-    
-    // Bump the pointer
-    ptr: *void = ((arena.buffer as i64) + arena.offset) as *void;
-    arena.offset = arena.offset + size;
-    return ptr;
+    return arena.alloc(size);
 }
 
-pub fn arena_free_impl(ctx: *void, ptr: *void) -> void {
+fn arena_free_impl(ctx: *void, ptr: *void) -> void {
 }
 
-pub fn create_arena(backing: std.mem.Allocator, size: i64) -> Arena {
-    buf: *char = backing.alloc(backing.ctx, size) as *char;
+pub fn Arena.new(backing: std.mem.Allocator, size: i64) -> Arena {
+    buf: *char = backing.alloc(size) as *char;
     return Arena {
         buffer: buf,
         capacity: size,
@@ -34,14 +25,39 @@ pub fn create_arena(backing: std.mem.Allocator, size: i64) -> Arena {
     };
 }
 
-pub fn get_arena_allocator(arena: *Arena) -> std.mem.Allocator {
+pub fn Arena.alloc(self: *Arena, size: i64) -> *void {
+    // Check for Out-Of-Memory
+    if (self.offset + size) > self.capacity {
+        return null; 
+    }
+    
+    // Bump the pointer
+    ptr: *void = ((self.buffer as i64) + self.offset) as *void;
+    self.offset = self.offset + size;
+    return ptr;
+}
+
+// Arena frees are no-ops: memory is reclaimed in bulk by .reset() or .destroy().
+pub fn Arena.free(self: *Arena, ptr: *void) -> void {
+}
+
+// Returns how many bytes are still available.
+pub fn Arena.remaining(self: *Arena) -> i64 {
+    return self.capacity - self.offset;
+}
+
+pub fn Arena.reset(self: *Arena) -> void {
+    self.offset = 0;
+}
+
+pub fn Arena.get_allocator(self: *Arena) -> std.mem.Allocator {
     return std.mem.Allocator {
-        ctx: arena as *void,
-        alloc: arena_alloc_impl,
-        free: arena_free_impl
+        ctx: self as *void,
+        _alloc: arena_alloc_impl,
+        _free: arena_free_impl
     };
 }
 
-pub fn destroy_arena(arena: *Arena) -> void {
-    arena.backing_allocator.free(arena.backing_allocator.ctx, arena.buffer as *void);
+pub fn Arena.destroy(self: *Arena) -> void {
+    self.backing_allocator.free(self.buffer as *void);
 }

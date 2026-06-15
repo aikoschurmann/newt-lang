@@ -1,0 +1,35 @@
+import std.libc;
+
+// A non-owning view into a string.  Does not null-terminate on its own.
+pub struct Str {
+    ptr: *char;
+    len: i64;
+}
+
+// Wrap a null-terminated C string into a Str view.
+pub fn Str.from_cstr(s: *char) -> Str {
+    return Str {
+        ptr: s,
+        len: std.libc.strlen(s)
+    };
+}
+
+// True if both views have identical content.
+pub fn Str.eq(self: *Str, other: Str) -> bool {
+    if self.len != other.len { return false; }
+    return std.libc.memcmp(self.ptr as *void, other.ptr as *void, self.len) == 0;
+}
+
+// True if `self` starts with `prefix`.
+pub fn Str.starts_with(self: *Str, prefix: Str) -> bool {
+    if prefix.len > self.len { return false; }
+    return std.libc.memcmp(self.ptr as *void, prefix.ptr as *void, prefix.len) == 0;
+}
+
+// Return a sub-view [start, start+len).  No bounds check — caller's responsibility.
+pub fn Str.slice(self: *Str, start: i64, len: i64) -> Str {
+    return Str {
+        ptr: (self.ptr as i64 + start) as *char,
+        len: len
+    };
+}

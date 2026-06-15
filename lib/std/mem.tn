@@ -1,7 +1,13 @@
-import std.libc;
-
 pub struct Allocator {
     ctx: *void;
-    alloc: fn(*void, i64) -> *void;
-    free: fn(*void, *void) -> void;
+    _alloc: fn(*void, i64) -> *void;
+    _free: fn(*void, *void) -> void;
+}
+
+pub fn Allocator.alloc(self: *Allocator, size: i64) -> *void {
+    return self._alloc(self.ctx, size);
+}
+
+pub fn Allocator.free(self: *Allocator, ptr: *void) -> void {
+    self._free(self.ctx, ptr);
 }
