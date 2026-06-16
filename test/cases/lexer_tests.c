@@ -2,11 +2,11 @@
 #include "../helpers/compiler_helpers.h"
 
 #define LEX_VALID(name, src) \
-    TEST_CASE("Lexer/Valid/" name) { ASSERT(test_is_lex_valid(src)); return 1; }
+    TEST_CASE_PRIO("Lexer/Valid/" name, 10) { ASSERT(test_is_lex_valid(src)); return 1; }
 #include "lexer_cases.inc"
 #undef LEX_VALID
 
-TEST_CASE("Lexer: Long Identifier Stress") {
+TEST_CASE_PRIO("Lexer: Long Identifier Stress", 10) {
     Arena *arena = arena_create(1024 * 1024);
     int len = 2000;
     char *src = arena_alloc(arena, len + 10);

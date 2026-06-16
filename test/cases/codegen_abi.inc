@@ -1,6 +1,6 @@
 // test/cases/codegen_abi.inc
 
-TEST_CASE("Codegen/ABI/LargeStructArg") {
+TEST_CASE_PRIO("Codegen/ABI/LargeStructArg", 40) {
     // 3 * 8 bytes = 24 bytes > 16 bytes limit. Must be passed by pointer (byval).
     const char *src = 
         "struct Large { a: i64; b: i64; c: i64; }\n"
@@ -15,7 +15,7 @@ TEST_CASE("Codegen/ABI/LargeStructArg") {
     return 1;
 }
 
-TEST_CASE("Codegen/ABI/LargeStructReturn") {
+TEST_CASE_PRIO("Codegen/ABI/LargeStructReturn", 40) {
     // Return a struct > 16 bytes (must use sret)
     const char *src = 
         "struct Large { a: i64; b: i64; c: i64; }\n"
@@ -30,7 +30,7 @@ TEST_CASE("Codegen/ABI/LargeStructReturn") {
     return 1;
 }
 
-TEST_CASE("Codegen/ABI/NestedLargeStruct") {
+TEST_CASE_PRIO("Codegen/ABI/NestedLargeStruct", 40) {
     const char *src = 
         "struct Large { a: i64; b: i64; c: i64; }\n"
         "struct Nested { l1: Large; l2: Large; }\n"

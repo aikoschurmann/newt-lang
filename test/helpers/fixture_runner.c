@@ -108,7 +108,7 @@ typecheck_program(&sema_ctx);
     return success;
 }
 
-TEST_CASE("Fixtures: Module Loader") {
+TEST_CASE_PRIO("Fixtures: Module Loader", 50) {
     const char *base_path = "test/fixtures/modules";
     int total_success = 1;
 

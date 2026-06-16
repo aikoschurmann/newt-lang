@@ -16,7 +16,7 @@
 typedef int (*TestFunc)(void);
 
 // Registry functions
-void test_registry_add(const char *name, TestFunc func);
+void test_registry_add(const char *name, TestFunc func, int priority);
 int run_all_registered_tests(int argc, char **argv);
 
 // Buffered logging for detailed results
@@ -27,15 +27,16 @@ void test_clear_log(void);
 #define CONCAT_INTERNAL(a, b) a ## b
 #define CONCAT(a, b) CONCAT_INTERNAL(a, b)
 
-#define TEST_CASE_INTERNAL(name, count) \
+#define TEST_CASE_PRIO_INTERNAL(name, priority, count) \
     static int CONCAT(_test_func_, count)(void); \
     __attribute__((constructor)) \
     static void CONCAT(_test_reg_, count)(void) { \
-        test_registry_add(name, CONCAT(_test_func_, count)); \
+        test_registry_add(name, CONCAT(_test_func_, count), priority); \
     } \
     static int CONCAT(_test_func_, count)(void)
 
-#define TEST_CASE(display_name) TEST_CASE_INTERNAL(display_name, __COUNTER__)
+#define TEST_CASE_PRIO(display_name, priority) TEST_CASE_PRIO_INTERNAL(display_name, priority, __COUNTER__)
+#define TEST_CASE(display_name) TEST_CASE_PRIO(display_name, 100)
 
 // Assertions
 #define ASSERT(cond) \
@@ -59,7 +60,7 @@ void test_clear_log(void);
 #define ASSERT_STR_EQ(actual, expected) \
     do { \
         if (strcmp((actual), (expected)) != 0) { \
-            fprintf(stderr, "  %sFAILED%s: Expected '%s', got '%s' (at %s:%d)\n", COL_RED, COL_RESET, (expected), (actual), __FILE__, __LINE__); \
+            test_log("      %sFAILED:%s Expected '%s', got '%s'\n      at %s:%d\n", COL_RED, COL_RESET, (expected), (actual), __FILE__, __LINE__); \
             return 0; \
         } \
     } while(0)
