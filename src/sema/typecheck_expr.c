@@ -792,6 +792,88 @@ static Type* check_struct_literal(TypeCheckContext *ctx, Scope *scope, AstNode *
 // SECTION 6: INTRINSICS
 // =============================================================================
 
+static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_arg, Type *alloc_ty) {
+    if (!alloc_ty) return;
+    
+    Type *t = alloc_ty;
+    if (t->kind == TYPE_POINTER) t = t->as.ptr.base;
+
+    if (t->kind != TYPE_STRUCT) {
+        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename };
+        err.as.mismatch.expected = ctx->store->t_void; // Placeholder for struct
+        err.as.mismatch.actual = alloc_ty;
+        dynarray_push_value(ctx->errors, &err);
+        return;
+    }
+
+    if (t->as.struct_type.field_count != 3) {
+        TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "Allocator struct must have exactly 3 fields: ctx, alloc, free" };
+        dynarray_push_value(ctx->errors, &err);
+        return;
+    }
+
+    const char *expected_fields[] = {"ctx", "_alloc", "_free"};
+    for (int i = 0; i < 3; i++) {
+        StructField *field = &t->as.struct_type.fields[i];
+        if (!field->name || !field->name->key) {
+             TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename,
+                              .as.name.name = "Allocator struct fields must have names" };
+            dynarray_push_value(ctx->errors, &err);
+            return;
+        }
+        Slice *field_name = (Slice*)field->name->key;
+        if (strncmp(field_name->ptr, expected_fields[i], field_name->len) != 0 || expected_fields[i][field_name->len] != '\0') {
+            TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename,
+                              .as.name.name = "Allocator struct fields must be named: ctx, _alloc, _free" };
+            dynarray_push_value(ctx->errors, &err);
+            return;
+        }
+    }
+    
+    StructField *ctx_field = &t->as.struct_type.fields[0];
+    StructField *alloc_field = &t->as.struct_type.fields[1];
+    StructField *free_field = &t->as.struct_type.fields[2];
+
+    if (!ctx_field->type || ctx_field->type->kind != TYPE_POINTER) {
+        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "Allocator field 'ctx' must be a pointer" };
+        dynarray_push_value(ctx->errors, &err);
+    }
+    
+    if (!alloc_field->type || alloc_field->type->kind != TYPE_FUNCTION) {
+        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "Allocator field 'alloc' must be a function" };
+        dynarray_push_value(ctx->errors, &err);
+    } else {
+        Type *fn_ty = alloc_field->type;
+        if (fn_ty->as.func.param_count != 2 || 
+            fn_ty->as.func.params[0]->kind != TYPE_POINTER ||
+            (fn_ty->as.func.params[1]->kind != TYPE_PRIMITIVE || fn_ty->as.func.params[1]->as.primitive != PRIM_I64) ||
+            fn_ty->as.func.return_type->kind != TYPE_POINTER) {
+            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
+                              .as.name.name = "Allocator field 'alloc' must have signature: fn(ptr, i64) -> ptr" };
+            dynarray_push_value(ctx->errors, &err);
+        }
+    }
+
+    if (!free_field->type || free_field->type->kind != TYPE_FUNCTION) {
+        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "Allocator field 'free' must be a function" };
+        dynarray_push_value(ctx->errors, &err);
+    } else {
+        Type *fn_ty = free_field->type;
+        if (fn_ty->as.func.param_count != 2 || 
+            fn_ty->as.func.params[0]->kind != TYPE_POINTER ||
+            fn_ty->as.func.params[1]->kind != TYPE_POINTER ||
+            !type_is_void(fn_ty->as.func.return_type)) {
+            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
+                              .as.name.name = "Allocator field 'free' must have signature: fn(ptr, ptr) -> void" };
+            dynarray_push_value(ctx->errors, &err);
+        }
+    }
+}
+
 /**
  * Validates compiler intrinsics (e.g. @alloc, @free), performing custom 
  * type checking logic per-intrinsic since they often bypass normal rules.
@@ -831,16 +913,7 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
         // 2. Arg 1: Must be an allocator struct
         Type *alloc_ty = check_expression(ctx, scope, alloc_arg, NULL);
-        if (alloc_ty) {
-            Type *underlying = alloc_ty;
-            if (underlying->kind == TYPE_POINTER) underlying = underlying->as.ptr.base;
-            if (underlying->kind != TYPE_STRUCT) {
-                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename };
-                err.as.mismatch.expected = ctx->store->t_void; // Just a placeholder for "expected struct"
-                err.as.mismatch.actual = alloc_ty;
-                dynarray_push_value(ctx->errors, &err);
-            }
-        }
+        validate_allocator_structure(ctx, alloc_arg, alloc_ty);
 
         // 3. Arg 2: Must be an integer if present
         if (count_arg) {
@@ -876,16 +949,7 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
         // 1. Arg 0: Must be an allocator struct
         Type *alloc_ty = check_expression(ctx, scope, alloc_arg, NULL);
-        if (alloc_ty) {
-            Type *underlying = alloc_ty;
-            if (underlying->kind == TYPE_POINTER) underlying = underlying->as.ptr.base;
-            if (underlying->kind != TYPE_STRUCT) {
-                TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename };
-                err.as.mismatch.expected = ctx->store->t_void; 
-                err.as.mismatch.actual = alloc_ty;
-                dynarray_push_value(ctx->errors, &err);
-            }
-        }
+        validate_allocator_structure(ctx, alloc_arg, alloc_ty);
 
         // 2. Arg 1: Must be a pointer
         Type *ptr_ty = check_expression(ctx, scope, ptr_arg, NULL);

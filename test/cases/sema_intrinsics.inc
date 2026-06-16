@@ -1,8 +1,8 @@
 // test/cases/sema_intrinsics.inc
 
-SEMA_ERROR("alloc_bad_fields", "struct Allocator { ctx: *void; } fn main() {}", TE_INCOMPLETE_TYPE)
-SEMA_ERROR("alloc_bad_names", "struct Allocator { c: *void; a: fn(*void, i64) -> *void; f: fn(*void, *void) -> void; } fn main() {}", TE_INCOMPLETE_TYPE)
-SEMA_ERROR("alloc_bad_sig", "struct Allocator { ctx: *void; _alloc: fn(i32) -> *void; _free: fn(*void, *void) -> void; } fn main() {}", TE_TYPE_MISMATCH)
+SEMA_ERROR("alloc_bad_fields", "struct Allocator { ctx: *void; } fn main() { a: Allocator; p: *i32 = @alloc(i32, a); }", TE_INCOMPLETE_TYPE)
+SEMA_ERROR("alloc_bad_names", "struct Allocator { c: *void; a: fn(*void, i64) -> *void; f: fn(*void, *void) -> void; } fn main() { a: Allocator; p: *i32 = @alloc(i32, a); }", TE_INCOMPLETE_TYPE)
+SEMA_ERROR("alloc_bad_sig", "struct Allocator { ctx: *void; _alloc: fn(i32) -> *void; _free: fn(*void, *void) -> void; } fn main() { a: Allocator; p: *i32 = @alloc(i32, a); }", TE_TYPE_MISMATCH)
 SEMA_ERROR("alloc_bad_args", "fn main() { p: *i32 = @alloc(i32); }", TE_ARG_COUNT_MISMATCH)
 SEMA_ERROR("free_bad_args", "fn main() { @free(); }", TE_ARG_COUNT_MISMATCH)
 

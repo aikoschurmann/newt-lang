@@ -15,95 +15,6 @@
 static void check_statement(TypeCheckContext *ctx, Scope *scope, AstNode *stmt, Type *return_type);
 static void check_block(TypeCheckContext *ctx, Scope *parent, AstNode *block_node, Type *return_type, bool create_new_scope);
 
-static void validate_allocator_struct(TypeCheckContext *ctx, Scope *global_scope) {
-    // 1. Look up 'Allocator' type in global scope
-    Slice name = { .ptr = "Allocator", .len = 9 };
-    InternResult *res = intern_peek(ctx->identifiers, &name);
-    if (!res) return; // Allocator not defined, user code error elsewhere
-
-    Symbol *sym = scope_lookup_symbol_local(global_scope, res);
-    if (!sym || sym->kind != SYMBOL_VALUE_TYPE) return; 
-
-    // Only validate the allocator in the file it was declared
-    if (sym->decl_node && sym->decl_node->filename && ctx->filename) {
-        if (strcmp(sym->decl_node->filename, ctx->filename) != 0) return;
-    }
-
-    Type *t = sym->type;
-    if (!t || t->kind != TYPE_STRUCT) return;
-
-    // 2. Validate field count and names
-    if (t->as.struct_type.field_count != 3) {
-        TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = sym->decl_node->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator struct must have exactly 3 fields: ctx, alloc, free" };
-        dynarray_push_value(ctx->errors, &err);
-        return;
-    }
-
-    const char *expected_fields[] = {"ctx", "_alloc", "_free"};
-    for (int i = 0; i < 3; i++) {
-        StructField *field = &t->as.struct_type.fields[i];
-        if (!field->name || !field->name->key) {
-             TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = sym->decl_node->span, .filename = ctx->filename,
-                              .as.name.name = "Allocator struct fields must have names" };
-            dynarray_push_value(ctx->errors, &err);
-            return;
-        }
-        Slice *field_name = (Slice*)field->name->key;
-        if (strncmp(field_name->ptr, expected_fields[i], field_name->len) != 0 || expected_fields[i][field_name->len] != '\0') {
-            TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = sym->decl_node->span, .filename = ctx->filename,
-                              .as.name.name = "Allocator struct fields must be named: ctx, _alloc, _free" };
-            dynarray_push_value(ctx->errors, &err);
-            return;
-        }
-    }
-    // 3. Signature checks
-    StructField *ctx_field = &t->as.struct_type.fields[0];
-    StructField *alloc_field = &t->as.struct_type.fields[1];
-    StructField *free_field = &t->as.struct_type.fields[2];
-
-    if (!ctx_field->type || ctx_field->type->kind != TYPE_POINTER) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = sym->decl_node->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field 'ctx' must be a pointer" };
-        dynarray_push_value(ctx->errors, &err);
-    }
-    
-    // Validate alloc: fn(ptr, i64) -> ptr
-    if (!alloc_field->type || alloc_field->type->kind != TYPE_FUNCTION) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = sym->decl_node->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field 'alloc' must be a function" };
-        dynarray_push_value(ctx->errors, &err);
-    } else {
-        Type *alloc_ty = alloc_field->type;
-        if (alloc_ty->as.func.param_count != 2 || 
-            alloc_ty->as.func.params[0]->kind != TYPE_POINTER ||
-            (alloc_ty->as.func.params[1]->kind != TYPE_PRIMITIVE || alloc_ty->as.func.params[1]->as.primitive != PRIM_I64) ||
-            alloc_ty->as.func.return_type->kind != TYPE_POINTER) {
-            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = sym->decl_node->span, .filename = ctx->filename, 
-                              .as.name.name = "Allocator field 'alloc' must have signature: fn(ptr, i64) -> ptr" };
-            dynarray_push_value(ctx->errors, &err);
-        }
-    }
-
-    // Validate free: fn(ptr, ptr) -> void
-    if (!free_field->type || free_field->type->kind != TYPE_FUNCTION) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = sym->decl_node->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field 'free' must be a function" };
-        dynarray_push_value(ctx->errors, &err);
-    } else {
-        Type *free_ty = free_field->type;
-        if (free_ty->as.func.param_count != 2 || 
-            free_ty->as.func.params[0]->kind != TYPE_POINTER ||
-            free_ty->as.func.params[1]->kind != TYPE_POINTER ||
-            !type_is_void(free_ty->as.func.return_type)) {
-            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = sym->decl_node->span, .filename = ctx->filename, 
-                              .as.name.name = "Allocator field 'free' must have signature: fn(ptr, ptr) -> void" };
-            dynarray_push_value(ctx->errors, &err);
-        }
-    }
-}
-
-
 TypeCheckContext typecheck_context_create(Arena *arena, TypeStore *store, DenseArenaInterner *identifiers, DenseArenaInterner *keywords, const char *filename, ModuleLoader *loader) {
     DynArray *errors = arena_alloc(arena, sizeof(DynArray));
     dynarray_init_in_arena(errors, arena, sizeof(TypeError), 8);
@@ -1105,8 +1016,6 @@ void typecheck_program(TypeCheckContext *ctx) {
         CompilationUnit *unit = *(CompilationUnit**)dynarray_get(ctx->loader->units_ordered, i);
         ctx->filename = unit->absolute_path;
         ctx->program = unit->ast_root;
-
-        validate_allocator_struct(ctx, unit->global_scope);
 
         AstProgram *program = &unit->ast_root->data.program;
         if (!program->decls) continue;
