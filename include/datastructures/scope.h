@@ -5,6 +5,7 @@
 #include "arena.h"
 #include "dynamic_array.h"
 #include "dense_arena_interner.h"
+#include "hash_map.h"
 
 // Forward declarations
 typedef struct Scope Scope;
@@ -67,9 +68,7 @@ typedef struct Symbol {
 } Symbol;
 
 typedef struct Scope {
-    // array of symbols indexed by InternResult dense index for O(1) lookup
-    Symbol **symbols;
-    size_t capacity; // Size of the symbols array
+    HashMap *symbols; // Open-addressed hash map for symbols
     DynArray symbols_list; // For efficient iteration
 
     Scope *parent;

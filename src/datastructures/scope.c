@@ -1,4 +1,4 @@
-#include "scope.h"
+#include "datastructures/scope.h"
 #include "core/module_loader.h"
 #include <stdio.h>
 #include <string.h>
@@ -8,7 +8,9 @@ Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind)
     Scope *scope = arena_calloc(arena, sizeof(Scope));
     if (!scope) return NULL;
 
-    scope->symbols = arena_calloc(arena, sizeof(Symbol *) * identifier_count);
+    // A small initial capacity is fine since hashmap handles resizing and 
+    // we no longer rely on dense indices to determine scope boundaries.
+    scope->symbols = hashmap_create(arena, identifier_count > 0 ? identifier_count : 8);
     if (!scope->symbols) {
         return NULL;
     }
@@ -18,7 +20,6 @@ Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind)
     scope->depth = parent ? parent->depth + 1 : 0;
     scope->parent = parent;
     scope->arena = arena;
-    scope->capacity = identifier_count; 
     scope->kind = kind;
     scope->unit = NULL;
 
@@ -32,23 +33,6 @@ Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolV
     
     // Type is optional (e.g. during Pass 1 name registration)
     // We used to restrict this to modules, but now allow it for all kinds.
-
-    if ((size_t)rec->entry->dense_index >= scope->capacity) {
-        size_t new_cap = scope->capacity ? scope->capacity * 2 : 16;
-        while (new_cap <= (size_t)rec->entry->dense_index) {
-            new_cap *= 2;
-        }
-        
-        Symbol **new_symbols = arena_calloc(scope->arena, sizeof(Symbol *) * new_cap);
-        if (!new_symbols) return NULL;
-        
-        if (scope->symbols) {
-            memcpy(new_symbols, scope->symbols, sizeof(Symbol *) * scope->capacity);
-        }
-        
-        scope->symbols = new_symbols;
-        scope->capacity = new_cap;
-    }
 
     // Check for existing symbol in current scope
     if (scope_lookup_symbol_local(scope, rec)) {
@@ -69,7 +53,8 @@ Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolV
     symbol->decl_node = decl_node;
     symbol->module_scope = NULL;
 
-    scope->symbols[rec->entry->dense_index] = symbol;
+    // Use ptr_hash and ptr_cmp since rec->key is guaranteed to be a unique, interned Slice*
+    hashmap_put(scope->symbols, rec->key, symbol, ptr_hash, ptr_cmp);
     
     dynarray_push_value(&scope->symbols_list, &symbol);
 
@@ -77,9 +62,8 @@ Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolV
 }
 
 Symbol *scope_lookup_symbol_local(Scope *scope, InternResult *rec) {
-    if (!scope || !rec) return NULL;
-    if ((size_t)rec->entry->dense_index >= scope->capacity) return NULL;
-    return scope->symbols[rec->entry->dense_index];
+    if (!scope || !rec || !rec->key) return NULL;
+    return (Symbol*)hashmap_get(scope->symbols, rec->key, ptr_hash, ptr_cmp);
 }
 
 Symbol *scope_lookup_symbol(Scope *scope, InternResult *rec, const char *caller_filename) {
