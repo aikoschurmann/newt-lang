@@ -276,6 +276,10 @@ Type* check_identifier(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         expr->is_llvm_const_safe = expr->is_foldable_const || is_aggregate;
     }
 
+    if (sym->kind == SYMBOL_VALUE_FUNCTION) {
+        expr->is_llvm_const_safe = 1;
+    }
+
     return sym->type;
 }
 

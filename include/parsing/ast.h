@@ -322,4 +322,4 @@ AstNode *ast_create_node(AstNodeType type, Arena *arena, const char *filename);
 void print_ast(AstNode *node, int depth, DenseArenaInterner *keywords, DenseArenaInterner *identifiers, DenseArenaInterner *strings);
 void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInterner *keywords, DenseArenaInterner *identifiers, DenseArenaInterner *strings);
 int is_lvalue_node(AstNode *node);
-int is_assignment_op(TokenType type);
+int is_assignment_op(TokenKind type);

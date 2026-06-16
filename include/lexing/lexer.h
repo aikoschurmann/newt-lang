@@ -73,7 +73,7 @@ bool lexer_lex_all(Lexer *lexer);
 Token* lexer_get_tokens(Lexer *lexer, size_t *count);
 
 /* Human-readable token type helper (convenience). */
-const char* token_type_to_string(TokenType type);
+const char* token_type_to_string(TokenKind type);
 
 void lexer_reset(Lexer *lexer);
 

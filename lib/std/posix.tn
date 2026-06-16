@@ -1,0 +1,17 @@
+// POSIX-only APIs — do not import on Windows.
+
+// mmap protection flags
+pub const PROT_READ: i32 = 1;
+pub const PROT_WRITE: i32 = 2;
+
+// mmap flags — values differ by OS
+// macOS: MAP_PRIVATE=0x2, MAP_ANON=0x1000
+// Linux: MAP_PRIVATE=0x2, MAP_ANON=0x20
+pub const MAP_PRIVATE: i32 = 2;
+pub const MAP_ANON: i32 = 4096;
+
+@link("mmap")
+pub fn mmap(addr: *void, len: i64, prot: i32, flags: i32, fd: i32, offset: i64) -> *void;
+
+@link("munmap")
+pub fn munmap(addr: *void, len: i64) -> i32;

@@ -92,14 +92,14 @@ typedef enum {
     TOK_AS,
     TOK_UNKNOWN
 
-} TokenType;
+} TokenKind;
 
 
 // ------------------------------
 // Token struct
 // ------------------------------
 typedef struct {
-    TokenType type;   // what kind of token
+    TokenKind type;   // what kind of token
     Slice slice;     /**< Non-owning view into the source buffer. Pointer remains valid as long as the source buffer (usually arena-owned) is alive. */
     Span span;        // position in source for error reporting
     InternResult *record;

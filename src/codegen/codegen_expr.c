@@ -1,5 +1,5 @@
 /**
- * @file codegen_expr.c
+ * @makefile codegen_expr.c
  * @brief Generates LLVM IR for expressions.
  * * This phase is now strictly separated from semantic analysis. It dynamically 
  * calculates struct layouts and memory indices on the fly, ensuring changes 
@@ -8,6 +8,7 @@
 
 #include "codegen_internal.h"
 #include "codegen/codegen_utils.h"
+#include "sema/symbol_utils.h"
 
 // Forward declaration
 LLVMValueRef codegen_expr(CodegenContext *ctx, AstNode *expr);
@@ -35,24 +36,37 @@ static LLVMValueRef codegen_expr_intrinsic(CodegenContext *ctx, AstNode *expr) {
         LLVMTypeRef llvm_target_type = get_llvm_type(ctx, target_type);
 
         // 2. Compute Allocation Size (count * sizeof(T))
-        LLVMValueRef allocator_val = codegen_expr(ctx, allocator_arg);
         LLVMValueRef count_val = count_arg ? codegen_expr(ctx, count_arg) : LLVMConstInt(i64ty, 1, 0);
         
         LLVMValueRef total_bytes = LLVMBuildMul(ctx->builder,
             LLVMBuildIntCast(ctx->builder, count_val, i64ty, "count_i64"),
             LLVMSizeOf(llvm_target_type), "alloc_bytes");
 
-        // 3. Extract Context and Function Pointer from Allocator Interface
+        // 3. Handle Allocator Struct/Pointer Resolution
+        Type *allocator_type = allocator_arg->type;
+        LLVMValueRef allocator_val = codegen_expr(ctx, allocator_arg);
+        
+        if (allocator_type && allocator_type->kind == TYPE_POINTER) {
+            allocator_type = allocator_type->as.ptr.base;
+        }
+
+        // DYNAMIC FIX: Always ensure we have a struct value, not a pointer.
+        // If the expression yielded a pointer (e.g. an L-value address), load the struct safely.
+        if (LLVMGetTypeKind(LLVMTypeOf(allocator_val)) == LLVMPointerTypeKind) {
+            allocator_val = codegen_load_value(ctx, allocator_val, allocator_type);
+        }
+
+        // 4. Extract Context and Function Pointer from Allocator Interface
         size_t ctx_idx, alloc_idx;
-        if (!struct_field_index(allocator_arg->type, "ctx", &ctx_idx) || 
-            !struct_field_index(allocator_arg->type, "_alloc", &alloc_idx)) {
-            ICE("@alloc allocator missing required fields");
+        if (!struct_field_index(allocator_type, "ctx", &ctx_idx) || 
+            !struct_field_index(allocator_type, "_alloc", &alloc_idx)) {
+            ICE(" @alloc allocator missing required fields");
         }
 
         LLVMValueRef ctx_val = LLVMBuildExtractValue(ctx->builder, allocator_val, (unsigned)ctx_idx, "ctx_val");
         LLVMValueRef alloc_fn = LLVMBuildExtractValue(ctx->builder, allocator_val, (unsigned)alloc_idx, "alloc_fn_val");
 
-        // 4. Invoke Custom Allocator
+        // 5. Invoke Custom Allocator
         LLVMTypeRef alloc_fn_ty = LLVMFunctionType(i8ptr, (LLVMTypeRef[]){i8ptr, i64ty}, 2, 0);
         LLVMValueRef call_args[] = { ctx_val, total_bytes };
         LLVMValueRef raw_mem = LLVMBuildCall2(ctx->builder, alloc_fn_ty, alloc_fn, call_args, 2, "raw_mem");
@@ -63,14 +77,23 @@ static LLVMValueRef codegen_expr_intrinsic(CodegenContext *ctx, AstNode *expr) {
         AstNode *allocator_arg = *(AstNode**)dynarray_get(args, args->count == 3 ? 1 : 0);
         AstNode *ptr_arg = *(AstNode**)dynarray_get(args, args->count == 3 ? 2 : 1);
 
+        Type *allocator_type = allocator_arg->type;
         LLVMValueRef allocator_val = codegen_expr(ctx, allocator_arg);
         LLVMValueRef ptr_val = codegen_expr(ctx, ptr_arg);
 
+        if (allocator_type && allocator_type->kind == TYPE_POINTER) {
+            allocator_type = allocator_type->as.ptr.base;
+        }
+
+        if (LLVMGetTypeKind(LLVMTypeOf(allocator_val)) == LLVMPointerTypeKind) {
+            allocator_val = codegen_load_value(ctx, allocator_val, allocator_type);
+        }
+
         // Extract Context and Free Function
         size_t ctx_idx, free_idx;
-        if (!struct_field_index(allocator_arg->type, "ctx", &ctx_idx) || 
-            !struct_field_index(allocator_arg->type, "_free", &free_idx)) {
-            ICE("@free allocator missing required fields");
+        if (!struct_field_index(allocator_type, "ctx", &ctx_idx) || 
+            !struct_field_index(allocator_type, "_free", &free_idx)) {
+            ICE(" @free allocator missing required fields");
         }
 
         LLVMValueRef ctx_val = LLVMBuildExtractValue(ctx->builder, allocator_val, (unsigned)ctx_idx, "ctx_val");
@@ -143,13 +166,15 @@ static LLVMValueRef codegen_expr_struct_literal(CodegenContext *ctx, AstNode *ex
     AstStructLiteral *lit = &expr->data.struct_literal;
     LLVMTypeRef struct_ty = get_llvm_type(ctx, expr->type);
     
+    // Check if the LLVM builder is active (it is NULL at global scope)
+    bool is_global = LLVMGetInsertBlock(ctx->builder) == NULL;
+
     // Constant Folding Path (Global Initializers)
-    if (expr->is_llvm_const_safe) {
+    if (expr->is_llvm_const_safe || is_global) {
         LLVMValueRef *fields = xmalloc(sizeof(LLVMValueRef) * lit->fields->count);
         for (size_t i = 0; i < lit->fields->count; i++) {
             AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, i);
             
-            // DYNAMIC LAYOUT RESOLUTION (Fix for PS-1)
             size_t idx;
             if (!get_struct_field_index(expr->type, init->name, &idx)) {
                 ICE_AT(expr, "Field index not found in codegen");
@@ -169,7 +194,6 @@ static LLVMValueRef codegen_expr_struct_literal(CodegenContext *ctx, AstNode *ex
         AstFieldInit *init = (AstFieldInit*)dynarray_get(lit->fields, i);
         LLVMValueRef field_val = codegen_expr(ctx, init->expr);
         
-        // DYNAMIC LAYOUT RESOLUTION (Fix for PS-1)
         size_t idx;
         if (!get_struct_field_index(expr->type, init->name, &idx)) {
             ICE_AT(expr, "Field index not found in codegen");
@@ -189,7 +213,10 @@ static LLVMValueRef codegen_expr_initializer_list(CodegenContext *ctx, AstNode *
     LLVMTypeRef arr_ty = get_llvm_type(ctx, t);
     LLVMTypeRef elem_ty = get_llvm_type(ctx, t->as.array.base);
 
-    if (expr->is_llvm_const_safe) {
+    // Check if the LLVM builder is active
+    bool is_global = LLVMGetInsertBlock(ctx->builder) == NULL;
+
+    if (expr->is_llvm_const_safe || is_global) {
         LLVMValueRef *elems = xmalloc(sizeof(LLVMValueRef) * list->elements->count);
         for (size_t i = 0; i < list->elements->count; i++) {
             AstNode *elem = *(AstNode**)dynarray_get(list->elements, i);

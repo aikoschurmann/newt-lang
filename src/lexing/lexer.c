@@ -23,7 +23,7 @@
 /* Keyword table for initial population (used only at startup) */
 static const struct {
     const char *word;
-    TokenType type;
+    TokenKind type;
 } KEYWORDS[] = {
     {"fn", TOK_FN},
     {"if", TOK_IF},
@@ -133,13 +133,13 @@ static void lexer_skip_whitespace(Lexer *lexer) {
 }
 
 /* Identifier or keyword (uses intern_peek to avoid insertion on keyword check) */
-static void *lexer_lex_identifier(Lexer *lexer, const char *start_ptr, const char *end_ptr, TokenType *out_type) {
+static void *lexer_lex_identifier(Lexer *lexer, const char *start_ptr, const char *end_ptr, TokenKind *out_type) {
     Slice slice = lexer_make_slice_from_ptrs(start_ptr, end_ptr);
 
     /* Lookup keyword WITHOUT inserting. intern_peek must be available. */
     InternResult *kwres = intern_peek(lexer->keywords, &slice);
     if (kwres) {
-        *out_type = (TokenType)(uintptr_t)kwres->entry->meta;
+        *out_type = (TokenKind)(uintptr_t)kwres->entry->meta;
         return kwres;
     }
 
@@ -154,7 +154,7 @@ static void *lexer_lex_identifier(Lexer *lexer, const char *start_ptr, const cha
 }
 
 /* Number literal (pointer-based scan). Handles basic integer/float forms. */
-static TokenType lexer_lex_number(Lexer *lexer, const char *start_ptr, const char **out_end_ptr) {
+static TokenKind lexer_lex_number(Lexer *lexer, const char *start_ptr, const char **out_end_ptr) {
     const char *p = start_ptr;
 
     if (*p == '0') {
@@ -203,7 +203,7 @@ static TokenType lexer_lex_number(Lexer *lexer, const char *start_ptr, const cha
 }
 
 /* String literal (handles escapes). Returns end pointer after closing quote. */
-static TokenType lexer_lex_string(const char **curptr, const char *endptr) {
+static TokenKind lexer_lex_string(const char **curptr, const char *endptr) {
     /* curptr points at the opening quote ('"') */
     const char *p = *curptr;
     p++; /* skip opening quote */
@@ -228,7 +228,7 @@ static TokenType lexer_lex_string(const char **curptr, const char *endptr) {
 }
 
 /* Char literal */
-static TokenType lexer_lex_char(const char **curptr, const char *endptr, uint32_t *out_codepoint) {
+static TokenKind lexer_lex_char(const char **curptr, const char *endptr, uint32_t *out_codepoint) {
     const char *p = *curptr;
     p++; /* skip opening '\'' */
 
@@ -326,7 +326,7 @@ Lexer* lexer_create(const char *source, size_t source_len, Arena *arena) {
     
     if (!keywords || !identifiers || !strings) return NULL;
 
-    /* Pre-intern keywords with TokenType as metadata */
+    /* Pre-intern keywords with TokenKind as metadata */
     lexer_populate_default_keywords(keywords);
 
     return lexer_create_ex(source, source_len, arena, keywords, identifiers, strings);
@@ -399,7 +399,7 @@ Token lexer_next_token(Lexer *lexer) {
 
     char c = lexer_advance(lexer);
 
-    TokenType token_type = TOK_UNKNOWN;
+    TokenKind token_type = TOK_UNKNOWN;
     void *rec = NULL;
     Slice slice = { NULL, 0 };
 
@@ -565,7 +565,7 @@ Token* lexer_get_tokens(Lexer *lexer, size_t *count) {
 }
 
 /* Human-readable token type (unchanged) */
-const char* token_type_to_string(TokenType type) {
+const char* token_type_to_string(TokenKind type) {
     switch (type) {
         case TOK_FN: return "FN";
         case TOK_IF: return "IF";

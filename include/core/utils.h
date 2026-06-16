@@ -74,3 +74,6 @@ void *xcalloc(size_t nmemb, size_t size);
 char *xstrdup(const char *s);
 
 char *get_runtime_path(void);
+
+// Runs a command and waits for it to complete. Returns exit code.
+int run_command(const char *cmd, char *const argv[]);

@@ -44,7 +44,7 @@ Token *parser_advance(Parser *p) {
     return tok;
 }
 
-Token *consume(Parser *p, TokenType expected) {
+Token *consume(Parser *p, TokenKind expected) {
     if (!p) return NULL;
     Token *tok = current_token(p);
     if (!tok || tok->type != expected) return NULL;
@@ -52,7 +52,7 @@ Token *consume(Parser *p, TokenType expected) {
     return tok;
 }
 
-int parser_match(Parser *p, TokenType expected) {
+int parser_match(Parser *p, TokenKind expected) {
     if (!p) return 0;
     Token *tok = current_token(p);
     if (!tok || tok->type != expected) return 0;

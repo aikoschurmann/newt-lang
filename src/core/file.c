@@ -1,41 +1,47 @@
 #include "file.h"
 #include <string.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 char *read_file(const char *filename) {
-    int fd = open(filename, O_RDONLY);
-    if (fd < 0) {
-        perror("open");
+    FILE *f = fopen(filename, "rb");
+    if (!f) {
+        perror("fopen");
         return NULL;
     }
 
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-        perror("fstat");
-        close(fd);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        perror("fseek");
+        fclose(f);
         return NULL;
     }
+    long length = ftell(f);
+    if (length < 0) {
+        perror("ftell");
+        fclose(f);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_SET);
 
-    size_t length = (size_t)st.st_size;
     char *buffer = malloc(length + 1);
     if (!buffer) {
         perror("malloc");
-        close(fd);
+        fclose(f);
         return NULL;
     }
 
-    ssize_t bytes_read = read(fd, buffer, length);
-    if (bytes_read < 0 || (size_t)bytes_read != length) {
-        perror("read");
+    size_t bytes_read = fread(buffer, 1, (size_t)length, f);
+    if (bytes_read != (size_t)length) {
+        if (ferror(f)) {
+            perror("fread");
+        } else {
+            fprintf(stderr, "Error: read only %zu of %ld bytes\n", bytes_read, length);
+        }
         free(buffer);
-        close(fd);
+        fclose(f);
         return NULL;
     }
 
     buffer[length] = '\0';  // Null-terminate the string
-    close(fd);
+    fclose(f);
     return buffer;
 }
 

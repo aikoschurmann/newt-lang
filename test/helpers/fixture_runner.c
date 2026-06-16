@@ -1,10 +1,21 @@
 #include "compiler_helpers.h"
 #include "../harness/test_harness.h"
 #include "module_loader.h"
-#include <dirent.h>
 #include <sys/stat.h>
 #include <string.h>
 #include <stdlib.h>
+
+#ifdef _WIN32
+    #include <windows.h>
+    // MSYS2 handles stat and S_ISDIR natively. 
+    // We only redefine them if they are strictly missing (e.g., pure MSVC)
+    #ifndef S_ISDIR
+        #define stat _stat
+        #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+    #endif
+#else
+    #include <dirent.h>
+#endif
 
 static int run_single_fixture(const char *dir_path, const char *name) {
     Arena *arena = arena_create(4 * 1024 * 1024);
@@ -99,10 +110,34 @@ typecheck_program(&sema_ctx);
 
 TEST_CASE("Fixtures: Module Loader") {
     const char *base_path = "test/fixtures/modules";
+    int total_success = 1;
+
+#ifdef _WIN32
+    WIN32_FIND_DATAA find_data;
+    char search_path[512];
+    snprintf(search_path, sizeof(search_path), "%s/*", base_path);
+    HANDLE hFind = FindFirstFileA(search_path, &find_data);
+    
+    if (hFind == INVALID_HANDLE_VALUE) return 1;
+
+    do {
+        if (find_data.cFileName[0] == '.') continue;
+        
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", base_path, find_data.cFileName);
+        
+        struct stat st;
+        if (stat(full_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (!run_single_fixture(full_path, find_data.cFileName)) {
+                total_success = 0;
+            }
+        }
+    } while (FindNextFileA(hFind, &find_data) != 0);
+    FindClose(hFind);
+#else
     DIR *dir = opendir(base_path);
     if (!dir) return 1;
 
-    int total_success = 1;
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.') continue;
@@ -118,5 +153,7 @@ TEST_CASE("Fixtures: Module Loader") {
         }
     }
     closedir(dir);
+#endif
+
     return total_success;
 }

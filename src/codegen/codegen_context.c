@@ -26,6 +26,7 @@ LLVMValueRef codegen_map_get(CodegenMap *m, void *key) {
     }
     return NULL;
 }
+
 CodegenContext* codegen_context_create(TypeStore *store, const char *module_name, int opt_level, ModuleLoader *loader) {
     CodegenContext *ctx = xmalloc(sizeof(CodegenContext));
     ctx->store = store;
@@ -97,7 +98,12 @@ void codegen_context_destroy(CodegenContext *ctx) {
         ctx->locals = parent;
     }
     LLVMDisposeBuilder(ctx->builder);
-    LLVMDisposeModule(ctx->module);
+    
+    // CRITICAL FIX: Only dispose the module if the JIT Engine didn't take ownership.
+    if (ctx->module) {
+        LLVMDisposeModule(ctx->module);
+    }
+    
     LLVMContextDispose(ctx->context);
     free(ctx);
 }

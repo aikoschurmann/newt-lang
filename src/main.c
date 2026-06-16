@@ -3,8 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/wait.h>
 
 #include "core/file.h"
 #include "lexing/lexer.h"
@@ -125,51 +123,50 @@ int main(int argc, char **argv) {
     if (codegen_program(cg_ctx) == 0) {
         if (opts.print_ir) codegen_dump_module(cg_ctx);
 
-        size_t obj_path_len = strlen(opts.output_name) + 4;
+#ifdef _WIN32
+        const char *obj_ext = ".obj";
+#else
+        const char *obj_ext = ".o";
+#endif
+
+        size_t obj_path_len = strlen(opts.output_name) + strlen(obj_ext) + 1;
         char *obj_path = arena_alloc(arena, obj_path_len);
-        snprintf(obj_path, obj_path_len, "%s.o", opts.output_name);
+        snprintf(obj_path, obj_path_len, "%s%s", opts.output_name, obj_ext);
         codegen_emit_object(cg_ctx, obj_path);
         
         if (opts.verbose) printf("Linking...\n");
 
         char *runtime_path = get_runtime_path();
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process: link with runtime
-            char *args[] = {"cc", obj_path, runtime_path, "-o", (char*)opts.output_name, NULL};
-            execvp("cc", args);
-            
-            // If execvp returns, it failed to start cc
-            perror("execvp");
-            exit(1);
-        } else if (pid > 0) {
-            int status;
-            waitpid(pid, &status, 0);
+        
+        // Use "cc" as a generic name, or "clang" if on Windows
+#ifdef _WIN32
+        const char *linker = "clang";
+#else
+        const char *linker = "cc";
+#endif
+
+        char *link_args[] = { (char*)linker, obj_path, runtime_path, "-o", (char*)opts.output_name, NULL };
+        if (run_command(linker, link_args) == 0) {
+            if (opts.verbose) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
             free(runtime_path);
-            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                if (opts.verbose) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
-                if (opts.run_executable) {
-                    pid_t pid2 = fork();
-                    if (pid2 == 0) {
-                        size_t run_cmd_len = strlen(opts.output_name) + 3;
-                        char *run_cmd = arena_alloc(arena, run_cmd_len);
-                        snprintf(run_cmd, run_cmd_len, "./%s", opts.output_name);
-                        char *run_args[] = { run_cmd, NULL };
-                        execvp(run_cmd, run_args);
-                        perror("execvp");
-                        exit(1);
-                    } else if (pid2 > 0) {
-                        waitpid(pid2, NULL, 0);
-                    } else {
-                        fprintf(stderr, "Error: fork failed for execution\n");
-                    }
-                }
-            } else {
-                fprintf(stderr, "Error: Linking failed\n");
-                exit_code = EXIT_IO;
+
+            if (opts.run_executable) {
+                char *run_cmd;
+#ifdef _WIN32
+                size_t run_cmd_len = strlen(opts.output_name) + 1;
+                run_cmd = arena_alloc(arena, run_cmd_len);
+                snprintf(run_cmd, run_cmd_len, "%s", opts.output_name);
+#else
+                size_t run_cmd_len = strlen(opts.output_name) + 3;
+                run_cmd = arena_alloc(arena, run_cmd_len);
+                snprintf(run_cmd, run_cmd_len, "./%s", opts.output_name);
+#endif
+                char *run_args[] = { run_cmd, NULL };
+                run_command(run_cmd, run_args);
             }
         } else {
-            fprintf(stderr, "Error: fork failed\n");
+            fprintf(stderr, "Error: Linking failed\n");
+            free(runtime_path);
             exit_code = EXIT_IO;
         }
     } else {
@@ -184,7 +181,7 @@ int main(int argc, char **argv) {
         printf("Time Parse/Load: %.3fms\n", t_parse * 1000);
         printf("Time Sema:       %.3fms\n", t_sema * 1000);
         printf("Time Codegen:    %.3fms\n", t_codegen * 1000);
-        printf("Peak RSS:        %ld KB\n", get_peak_rss_kb());
+        printf("Peak RSS:        %zu KB\n", get_peak_rss_kb());
     }
 
 cleanup:

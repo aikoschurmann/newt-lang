@@ -1,20 +1,70 @@
-# Makefile (improved)
+# Makefile
 OUT_DIR := out
 SRC_DIR := src
 TEST_DIR := tests
 OBJ_DIR := obj
 
-CC := gcc
+# OS Detection
+ifeq ($(OS),Windows_NT)
+    PLATFORM := windows
+    EXE_EXT := .exe
+else
+    UNAME_S := $(shell uname -s)
+    ifeq ($(UNAME_S),Linux)
+        PLATFORM := linux
+    endif
+    ifeq ($(UNAME_S),Darwin)
+        PLATFORM := macos
+    endif
+    EXE_EXT :=
+endif
 
-LLVM_CONFIG := /opt/homebrew/opt/llvm/bin/llvm-config
-LLVM_CFLAGS := $(shell $(LLVM_CONFIG) --cflags)
-LLVM_LDFLAGS := $(shell $(LLVM_CONFIG) --ldflags --libs core analysis bitwriter target native executionengine mcjit orcjit)
+CC := clang
+
+# LLVM Configuration
+# Try to find llvm-config in PATH, otherwise fallback to common locations
+LLVM_CONFIG := $(shell which llvm-config 2>/dev/null)
+ifeq ($(LLVM_CONFIG),)
+    # If not in path, try common locations
+    ifeq ($(PLATFORM),macos)
+        LLVM_CONFIG := $(shell find /opt/homebrew/opt/llvm/bin -name llvm-config 2>/dev/null | head -n 1)
+    endif
+    ifeq ($(PLATFORM),windows)
+        # Fix 1: Removed 'where ... | head -n 1' as 'head' does not exist in standard Windows CMD.
+        # Fall back gracefully to the standard local installation path instead.
+        ifneq ($(wildcard C:/Program Files/LLVM/bin/llvm-config.exe),)
+            LLVM_CONFIG := C:/Program Files/LLVM/bin/llvm-config.exe
+        endif
+    endif
+endif
+
+ifneq ($(LLVM_CONFIG),)
+    # Fix 2: Wrap $(LLVM_CONFIG) in quotes so paths like 'Program Files' don't break execution
+    LLVM_CFLAGS := $(shell "$(LLVM_CONFIG)" --cflags)
+    LLVM_LDFLAGS := $(shell "$(LLVM_CONFIG)" --ldflags --libs core analysis bitwriter target native executionengine mcjit orcjit)
+else
+    # Fallback for Windows if llvm-config is absolutely not found but LLVM might be there
+    ifeq ($(PLATFORM),windows)
+        ifneq ($(wildcard C:/Program Files/LLVM/include),)
+            # Fix 3: Added quotes around Include and Lib flags to prevent clang from interpreting spaces as separate arguments
+            LLVM_CFLAGS := -I"C:/Program Files/LLVM/include"
+            LLVM_LDFLAGS := -L"C:/Program Files/LLVM/lib" -lLLVM
+        endif
+    endif
+    ifeq ($(LLVM_CFLAGS),)
+        $(warning llvm-config not found. LLVM-based features may fail to compile.)
+    endif
+endif
 
 # Base flags
 CFLAGS_BASE := -Iinclude -Iinclude/cli -Iinclude/core -Iinclude/codegen -Iinclude/datastructures -Iinclude/lexing -Iinclude/parsing -Iinclude/sema -Iinclude/types $(LLVM_CFLAGS) -MMD -MP -g \
     -Wall -Wextra -Wno-unused-parameter \
     -Wshadow -Wstrict-prototypes -Wmissing-prototypes
-LDFLAGS_BASE := -lm $(LLVM_LDFLAGS) -rdynamic
+LDFLAGS_BASE := -lm $(LLVM_LDFLAGS)
+
+ifneq ($(PLATFORM),windows)
+    LDFLAGS_BASE += -rdynamic
+endif
 
 # Release flags
 CFLAGS_RELEASE := $(CFLAGS_BASE) -O3
@@ -28,8 +78,8 @@ LDFLAGS_DEV := $(LDFLAGS_BASE)
 CFLAGS_ASAN := $(CFLAGS_BASE) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-common
 LDFLAGS_ASAN := $(LDFLAGS_BASE) -fsanitize=address,undefined
 
-NAME := compiler
-NAME_DEV := compiler-dev
+NAME := compiler$(EXE_EXT)
+NAME_DEV := compiler-dev$(EXE_EXT)
 
 # Gather sources
 SRC_FILES := $(shell find $(SRC_DIR) -type f -name "*.c")

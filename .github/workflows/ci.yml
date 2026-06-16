@@ -1,0 +1,63 @@
+name: C Compiler CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # Prevents GitHub from cancelling other OS builds if one fails
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 1. OS-SPECIFIC DEPENDENCY INSTALLATIONS
+      # ==========================================
+
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm llvm-dev make
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm
+          # Add Homebrew LLVM to PATH so the Makefile's 'which llvm-config' finds it natively
+          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+
+      - name: Set up MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-llvm
+            mingw-w64-ucrt-x86_64-clang
+
+      # ==========================================
+      # 2. BUILD AND TEST EXECUTIONS
+      # ==========================================
+
+      # Linux and macOS use the standard bash shell
+      - name: Build and Test (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          make all
+          make test
+
+      # Windows MUST run inside the MSYS2 shell to access the installed LLVM packages
+      - name: Build and Test (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          make all
+          make test

@@ -120,14 +120,6 @@ TypeCheckContext typecheck_context_create(Arena *arena, TypeStore *store, DenseA
     return ctx;
 }
 
-#ifdef _MSC_VER
-#include <malloc.h>
-#define ALLOCA _alloca
-#else
-#include <alloca.h>
-#define ALLOCA alloca
-#endif
-
 #define FAST_GET(arr, i) (((AstNode**)(arr)->data)[i])
 
 // -----------------------------------------------------------------------------

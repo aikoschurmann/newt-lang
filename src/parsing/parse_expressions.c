@@ -458,7 +458,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
     return primary;
 }
 
-static LiteralType get_literal_type(TokenType type) {
+static LiteralType get_literal_type(TokenKind type) {
     switch (type) {
         case TOK_INT_LIT:    return INT_LITERAL;
         case TOK_FLOAT_LIT:  return FLOAT_LITERAL;

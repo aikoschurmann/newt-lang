@@ -13,6 +13,18 @@
 #include <sys/stat.h>
 #include <stdarg.h>
 
+#ifdef _WIN32
+    #include <windows.h>
+    #include <io.h>
+    #define stat _stat
+    #ifndef S_ISREG
+        #define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
+    #endif
+#else
+    #include <unistd.h>
+    #include <sys/stat.h>
+#endif
+
 #define MAX_RECURSION_DEPTH 256
 
 typedef struct {
@@ -89,12 +101,27 @@ ModuleLoader* module_loader_create(Arena *arena, Options *opts,
 }
 
 static char* get_absolute_path_real(Arena *arena, const char *path) {
+#ifdef _WIN32
+    char abs[MAX_PATH];
+    if (!_fullpath(abs, path, MAX_PATH)) return NULL;
+    
+    // Normalize Windows backslashes to forward slashes.
+    // This allows strrchr(dir, '/') to properly isolate directories.
+    for (char *p = abs; *p; p++) {
+        if (*p == '\\') *p = '/';
+    }
+    
+    char *interned = arena_alloc(arena, strlen(abs) + 1);
+    strcpy(interned, abs);
+    return interned;
+#else
     char *abs = realpath(path, NULL);
     if (!abs) return NULL;
     char *interned = arena_alloc(arena, strlen(abs) + 1);
     strcpy(interned, abs);
     free(abs);
     return interned;
+#endif
 }
 
 CompilationUnit* module_loader_get_unit(ModuleLoader *loader, const char *path) {

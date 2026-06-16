@@ -168,7 +168,7 @@ int is_lvalue_node(AstNode *node) {
     }
 }
 
-int is_assignment_op(TokenType type) {
+int is_assignment_op(TokenKind type) {
     switch (type) {
         case TOK_ASSIGN:
         case TOK_PLUS_EQ:

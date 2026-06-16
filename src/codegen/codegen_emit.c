@@ -12,6 +12,14 @@ void codegen_initialize(void) {
     LLVMInitializeAllAsmPrinters();
     LLVMLinkInMCJIT();
     LLVMLoadLibraryPermanently(NULL);
+
+#ifdef _WIN32
+    // On Windows, LLVMLoadLibraryPermanently(NULL) does not expose CRT symbols
+    // to the JIT. We must explicitly load the UCRT DLL so that @link("malloc"),
+    // @link("free"), @link("printf"), etc. can be resolved at JIT runtime.
+    LLVMLoadLibraryPermanently("ucrtbase.dll");   // UCRT (Windows 10+, MSYS2 UCRT64)
+    LLVMLoadLibraryPermanently("msvcrt.dll");      // Fallback for older environments
+#endif
 }
 
 static void run_optimizations(CodegenContext *ctx) {
@@ -74,10 +82,11 @@ int codegen_program(CodegenContext *ctx) {
 }
 
 void codegen_dump_module(CodegenContext *ctx) {
-    LLVMDumpModule(ctx->module);
+    if (ctx->module) LLVMDumpModule(ctx->module);
 }
 
 void codegen_emit_object(CodegenContext *ctx, const char *filename) {
+    if (!ctx->module) return;
     char *error = NULL;
     if (LLVMTargetMachineEmitToFile(ctx->machine, ctx->module, (char *)filename,
                                     LLVMObjectFile, &error)) {
@@ -87,6 +96,8 @@ void codegen_emit_object(CodegenContext *ctx, const char *filename) {
 }
 
 int codegen_run_jit(CodegenContext *ctx) {
+    if (!ctx->module) return -1;
+    
     LLVMExecutionEngineRef engine;
     char *error = NULL;
 
@@ -96,24 +107,19 @@ int codegen_run_jit(CodegenContext *ctx) {
         return -1;
     }
 
-    LLVMValueRef main_func = LLVMGetNamedFunction(engine ? ctx->module : NULL, "main");
-    
-    if (!main_func) {
-        fprintf(stderr, "Could not find main function\n");
-        LLVMRemoveModule(engine, ctx->module, &ctx->module, &error);
+    // CRITICAL FIX: The ExecutionEngine has successfully taken ownership of ctx->module.
+    // We MUST set it to NULL here so we don't accidentally double-free it later.
+    ctx->module = NULL;
+
+    uint64_t addr = LLVMGetFunctionAddress(engine, "main");
+    if (addr == 0) {
+        fprintf(stderr, "Failed to resolve main function address in JIT\n");
         LLVMDisposeExecutionEngine(engine);
         return -1;
     }
-
-    uint64_t addr = LLVMGetFunctionAddress(engine, "main");
+    
     int (*main_ptr)(void) = (int (*)(void))addr;
     int result = main_ptr();
-
-    LLVMModuleRef removed_module;
-    if (LLVMRemoveModule(engine, ctx->module, &removed_module, &error) != 0) {
-        fprintf(stderr, "Failed to remove module from JIT: %s\n", error);
-        LLVMDisposeMessage(error);
-    }
 
     LLVMDisposeExecutionEngine(engine);
     return result;

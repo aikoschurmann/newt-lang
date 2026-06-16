@@ -37,8 +37,8 @@ Token   *peek(Parser *p, size_t offset);     /* token at current+offset or NULL 
 
 /* Advance and consume helpers */
 Token   *parser_advance(Parser *p);                       /* consume and return token previously current, or NULL */
-Token   *consume(Parser *p, TokenType expected);          /* consume when exact type expected, else NULL */
-int      parser_match(Parser *p, TokenType expected);    /* if current==expected, advance and return 1 */
+Token   *consume(Parser *p, TokenKind expected);          /* consume when exact type expected, else NULL */
+int      parser_match(Parser *p, TokenKind expected);    /* if current==expected, advance and return 1 */
 
 /* utility: create parse error message. This will allocate message in parser->arena */
 void     create_parse_error(ParseError *err_out, Parser *p, const char *message, Token *token);
