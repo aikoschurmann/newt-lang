@@ -136,13 +136,23 @@ static int run_single_fixture(const char *dir_path, const char *name) {
                 dup2(stdout_save, STDOUT_FILENO);
                 close(stdout_save);
 
-                char actual_output[8192]; // Adjust buffer size as needed
+                char actual_output[8192]; 
                 ssize_t n = read(pipe_fds[0], actual_output, sizeof(actual_output) - 1);
                 if (n < 0) n = 0;
                 actual_output[n] = '\0';
                 close(pipe_fds[0]);
 
-                if (strcmp(actual_output, expected_output) != 0) {
+                // Normalize: remove \r to handle Windows line endings
+                char normalized_actual[8192];
+                size_t j = 0;
+                for (size_t i = 0; i < (size_t)n; i++) {
+                    if (actual_output[i] != '\r') {
+                        normalized_actual[j++] = actual_output[i];
+                    }
+                }
+                normalized_actual[j] = '\0';
+
+                if (strcmp(normalized_actual, expected_output) != 0) {
                     test_log("      %s✗%s %-30s (Output mismatch)\n", COL_RED, COL_RESET, name);
                     // Optional: diff print
                     success = 0;
