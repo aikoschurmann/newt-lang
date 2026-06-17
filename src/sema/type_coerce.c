@@ -6,6 +6,60 @@
 #include "datastructures/arena.h"
 #include <string.h>
 
+/* Matrix for implicit primitive coercion (widening and lossless promotion).
+   Rows: Source type, Columns: Target type.
+   Indices correspond to PrimitiveKind enum in include/sema/type.h:
+   0:I8, 1:I16, 2:I32, 3:I64, 4:U8, 5:U16, 6:U32, 7:U64, 8:F32, 9:F64, 10:BOOL, 11:CHAR */
+static const bool primitive_coercion_matrix[12][12] = {
+    /* Target: I8  I16 I32 I64 U8  U16 U32 U64 F32 F64 BOL CHR */
+    /* I8  */ {0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  0},
+    /* I16 */ {0,  0,  1,  1,  0,  0,  0,  0,  1,  1,  0,  0},
+    /* I32 */ {0,  0,  0,  1,  0,  0,  0,  0,  0,  1,  0,  0},
+    /* I64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* U8  */ {0,  1,  1,  1,  0,  1,  1,  1,  1,  1,  0,  0},
+    /* U16 */ {0,  0,  1,  1,  0,  0,  1,  1,  1,  1,  0,  0},
+    /* U32 */ {0,  0,  0,  1,  0,  0,  0,  1,  0,  1,  0,  0},
+    /* U64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* F32 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0},
+    /* F64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* BOL */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* CHR */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+};
+
+static bool can_implicit_cast_primitive(Type *target, Type *source) {
+    PrimitiveKind s = source->as.primitive;
+    PrimitiveKind t = target->as.primitive;
+
+    if (s < 0 || s >= 12 || t < 0 || t >= 12) return false;
+
+    return primitive_coercion_matrix[s][t];
+}
+
+static bool can_implicit_cast_array(Type *target, Type *source) {
+    // 2. Array Decay (T[N] -> T[])
+    if (target->kind == TYPE_SLICE) {
+        return target->as.slice.base == source->as.array.base;
+    }
+    // 4. Array to Pointer Decay (T[N] -> *T)
+    if (target->kind == TYPE_POINTER) {
+        return target->as.ptr.base == source->as.array.base;
+    }
+    return false;
+}
+
+static bool can_implicit_cast_pointer(Type *target, Type *source) {
+    // Safe: T* -> *void (Implicitly discarding type info)
+    if (type_is_void(target->as.ptr.base)) return true;
+    
+    // Tightened: T[N]* -> T[]* only if T is identical
+    Type *sb = source->as.ptr.base;
+    Type *tb = target->as.ptr.base;
+    if (sb->kind == TYPE_ARRAY && tb->kind == TYPE_SLICE) {
+            return tb->as.slice.base == sb->as.array.base;
+    }
+    return false;
+}
+
 /**
  * Checks if 'source' can be implicitly promoted/decayed to 'target'
  * based on the language's coercion rules (e.g. widening, array-to-slice).
@@ -14,61 +68,16 @@ bool type_can_implicit_cast(Type *target, Type *source) {
     if (!target || !source) return false;
     if (target == source) return true;
 
-    // 1. Lossless Widening ONLY (Rust-strict style)
     if (source->kind == TYPE_PRIMITIVE && target->kind == TYPE_PRIMITIVE) {
-        PrimitiveKind s = source->as.primitive;
-        PrimitiveKind t = target->as.primitive;
-
-        // Same signedness widening
-        if (s == PRIM_I8  && (t == PRIM_I16 || t == PRIM_I32 || t == PRIM_I64)) return true;
-        if (s == PRIM_I16 && (t == PRIM_I32 || t == PRIM_I64)) return true;
-        if (s == PRIM_I32 && t == PRIM_I64) return true;
-
-        if (s == PRIM_U8  && (t == PRIM_U16 || t == PRIM_U32 || t == PRIM_U64)) return true;
-        if (s == PRIM_U16 && (t == PRIM_U32 || t == PRIM_U64)) return true;
-        if (s == PRIM_U32 && t == PRIM_U64) return true;
-
-        // Unsigned to Signed widening (must have at least one extra bit)
-        if (s == PRIM_U8  && (t == PRIM_I16 || t == PRIM_I32 || t == PRIM_I64)) return true;
-        if (s == PRIM_U16 && (t == PRIM_I32 || t == PRIM_I64)) return true;
-        if (s == PRIM_U32 && t == PRIM_I64) return true;
-
-        // Float widening
-        if (s == PRIM_F32 && t == PRIM_F64) return true;
-
-        // Integer to Float widening (Lossless)
-        if (t == PRIM_F64) {
-            // i32 fits in f64 mantissa (53 bits)
-            if (s == PRIM_I8 || s == PRIM_I16 || s == PRIM_I32 || s == PRIM_U8 || s == PRIM_U16 || s == PRIM_U32) return true;
-        }
-        if (t == PRIM_F32) {
-            // i16 fits in f32 mantissa (24 bits)
-            if (s == PRIM_I8 || s == PRIM_I16 || s == PRIM_U8 || s == PRIM_U16) return true;
-        }
+        return can_implicit_cast_primitive(target, source);
     }
 
-    // 2. Array Decay (T[N] -> T[])
-    // Tightened: base types must be IDENTICAL, no recursive implicit casting.
-    if (target->kind == TYPE_SLICE && source->kind == TYPE_ARRAY) {
-        return target->as.slice.base == source->as.array.base;
+    if (source->kind == TYPE_ARRAY) {
+        return can_implicit_cast_array(target, source);
     }
 
-    // 3. Pointer Relaxation
-    if (target->kind == TYPE_POINTER && source->kind == TYPE_POINTER) {
-        // Safe: T* -> *void (Implicitly discarding type info)
-        if (type_is_void(target->as.ptr.base)) return true;
-        
-        // Tightened: T[N]* -> T[]* only if T is identical
-        Type *sb = source->as.ptr.base;
-        Type *tb = target->as.ptr.base;
-        if (sb->kind == TYPE_ARRAY && tb->kind == TYPE_SLICE) {
-             return tb->as.slice.base == sb->as.array.base;
-        }
-    }
-
-    // 4. Array to Pointer Decay (T[N] -> *T)
-    if (target->kind == TYPE_POINTER && source->kind == TYPE_ARRAY) {
-        return target->as.ptr.base == source->as.array.base;
+    if (source->kind == TYPE_POINTER && target->kind == TYPE_POINTER) {
+        return can_implicit_cast_pointer(target, source);
     }
 
     return false;

@@ -22,169 +22,170 @@
 #include "core/module_loader.h"
 #include "core/exit_codes.h"
 
-int main(int argc, char **argv) {
-    codegen_initialize();
-    // 1. Parse CLI Options
-    Options opts;
-    const char *path = NULL;
-    if (!parse_options(argc, argv, &opts, &path)) {
-        return EXIT_USAGE;
+typedef struct {
+    Options *opts;
+    Arena *arena;
+    DenseArenaInterner *keywords;
+    DenseArenaInterner *identifiers;
+    DenseArenaInterner *strings;
+    ModuleLoader *loader;
+    TypeStore *store;
+    double t_start;
+} CompilerState;
+
+static int compiler_init(CompilerState *state, Options *opts) {
+    state->opts = opts;
+    state->t_start = now_seconds();
+    state->arena = arena_create(8 * 1024 * 1024);
+    if (!state->arena) return EXIT_IO;
+
+    state->keywords = intern_table_create(hashmap_create(state->arena, 32), state->arena, string_copy_func, slice_hash, slice_cmp);
+    state->identifiers = intern_table_create(hashmap_create(state->arena, 256), state->arena, string_copy_func, slice_hash, slice_cmp);
+    state->strings = intern_table_create(hashmap_create(state->arena, 128), state->arena, string_copy_func, slice_hash, slice_cmp);
+
+    lexer_populate_default_keywords(state->keywords);
+    state->loader = module_loader_create(state->arena, opts, state->keywords, state->identifiers, state->strings);
+    state->store = NULL;
+    return EXIT_OK;
+}
+
+static int compiler_load_modules(CompilerState *state, const char *path) {
+    return load_module_recursive(state->loader, path, NULL, NULL, 0);
+}
+
+static int compiler_run_sema(CompilerState *state) {
+    if (state->opts->verbose) printf("Semantic Analysis...\n");
+    state->store = typestore_create(state->arena, state->identifiers, state->keywords);
+    
+    CompilationUnit *first_unit = *(CompilationUnit**)dynarray_get(state->loader->units_ordered, 0);
+    TypeCheckContext type_ctx = typecheck_context_create(
+        state->arena, state->store, state->identifiers, state->keywords, first_unit->absolute_path, state->loader
+    );
+
+    typecheck_program(&type_ctx);
+
+    if (type_ctx.errors->count > 0) {
+        for (size_t i = 0; i < type_ctx.errors->count; i++) {
+            print_type_error((TypeError*)dynarray_get(type_ctx.errors, i));
+        }
+        return EXIT_TYPE;
+    }
+    return EXIT_OK;
+}
+
+static void compiler_dump_info(CompilerState *state) {
+    if (state->opts->print_ast) {
+        printf("--- AST ---\n");
+        for (size_t i = 0; i < state->loader->units_ordered->count; i++) {
+            CompilationUnit *u = *(CompilationUnit**)dynarray_get(state->loader->units_ordered, i);
+            printf("Module: %s\n", u->absolute_path);
+            print_ast(u->ast_root, 0, state->keywords, state->identifiers, state->strings);
+        }
+    }
+    if (state->opts->print_types) {
+        CompilationUnit *main_unit = *(CompilationUnit**)dynarray_get(state->loader->units_ordered, state->loader->units_ordered->count - 1);
+        type_print_store_dump(state->store, main_unit->global_scope);
+    }
+}
+
+static int compiler_run_backend(CompilerState *state) {
+    if (state->opts->verbose) printf("Code Generation...\n");
+    CodegenContext *cg_ctx = codegen_context_create(state->store, "main_module", state->opts->opt_level, state->loader);
+    
+    if (codegen_program(cg_ctx) != 0) {
+        fprintf(stderr, "Error: Code generation failed\n");
+        codegen_context_destroy(cg_ctx);
+        return EXIT_TYPE;
     }
 
-    int exit_code = EXIT_OK;
-    Arena *arena = NULL;
-    
-    // Metric tracking
-    long peak_rss_before_kb = get_peak_rss_kb();
-    (void)peak_rss_before_kb;
-    double t_start = now_seconds();
+    if (state->opts->print_ir) codegen_dump_module(cg_ctx);
 
-    // 2. Initialize Core Resources
-    arena = arena_create(8 * 1024 * 1024); // 8MB for multi-module
-    if (!arena) {
-        fprintf(stderr, "Error: Failed to create memory arena\n");
+    char *obj_ext = 
+#ifdef _WIN32
+        ".obj";
+#else
+        ".o";
+#endif
+
+    size_t obj_path_len = strlen(state->opts->output_name) + strlen(obj_ext) + 1;
+    char *obj_path = arena_alloc(state->arena, obj_path_len);
+    snprintf(obj_path, obj_path_len, "%s%s", state->opts->output_name, obj_ext);
+    codegen_emit_object(cg_ctx, obj_path);
+    
+    if (state->opts->verbose) printf("Linking...\n");
+    char *runtime_path = get_runtime_path();
+    char *linker = 
+#ifdef _WIN32
+        "clang";
+#else
+        "cc";
+#endif
+
+    char *link_args[] = { linker, obj_path, runtime_path, "-o", (char*)state->opts->output_name, NULL };
+    int link_res = run_command(linker, link_args);
+    free(runtime_path);
+
+    if (link_res != 0) {
+        fprintf(stderr, "Error: Linking failed\n");
+        codegen_context_destroy(cg_ctx);
         return EXIT_IO;
     }
 
-    // Shared Interners
-    DenseArenaInterner *keywords = intern_table_create(hashmap_create(arena, 32), arena, string_copy_func, slice_hash, slice_cmp);
-    DenseArenaInterner *identifiers = intern_table_create(hashmap_create(arena, 256), arena, string_copy_func, slice_hash, slice_cmp);
-    DenseArenaInterner *strings = intern_table_create(hashmap_create(arena, 128), arena, string_copy_func, slice_hash, slice_cmp);
+    if (state->opts->verbose) printf("Successfully compiled to '%s' executable.\n", state->opts->output_name);
 
-    /* Pre-intern keywords */
-    lexer_populate_default_keywords(keywords);
+    if (state->opts->run_executable) {
+        char *run_cmd;
+#ifdef _WIN32
+        run_cmd = (char*)state->opts->output_name;
+#else
+        size_t len = strlen(state->opts->output_name) + 3;
+        run_cmd = arena_alloc(state->arena, len);
+        snprintf(run_cmd, len, "./%s", state->opts->output_name);
+#endif
+        char *run_args[] = { run_cmd, NULL };
+        run_command(run_cmd, run_args);
+    }
 
-    ModuleLoader *loader = module_loader_create(arena, &opts, keywords, identifiers, strings);
+    codegen_context_destroy(cg_ctx);
+    return EXIT_OK;
+}
 
-    // Recursive Load
-    exit_code = load_module_recursive(loader, path, NULL, NULL, 0);
+int main(int argc, char **argv) {
+    codegen_initialize();
+    
+    Options opts;
+    const char *path = NULL;
+    if (!parse_options(argc, argv, &opts, &path)) return EXIT_USAGE;
+
+    CompilerState state;
+    int exit_code = compiler_init(&state, &opts);
+    if (exit_code != EXIT_OK) return exit_code;
+
+    exit_code = compiler_load_modules(&state, path);
     if (exit_code != EXIT_OK) goto cleanup;
 
-    double t_load_end = now_seconds();
-    double t_parse = t_load_end - t_start;
+    double t_load = now_seconds() - state.t_start;
 
-    // ---------------------------------------------------------
-    // Semantic Analysis (Type Checking)
-    // ---------------------------------------------------------
-    if (opts.verbose) printf("Semantic Analysis...\n");
-    size_t mem_before_sema = arena_total_allocated(arena);
-    double t3 = now_seconds();
+    double t_sema_start = now_seconds();
+    exit_code = compiler_run_sema(&state);
+    double t_sema = now_seconds() - t_sema_start;
+    if (exit_code != EXIT_OK) goto cleanup;
 
-    // Create Type System
-    TypeStore *store = typestore_create(arena, identifiers, keywords);
-    TypeCheckContext type_ctx = typecheck_context_create(
-        arena, 
-        store, 
-        identifiers, 
-        keywords, 
-        path,
-        loader
-    );
+    compiler_dump_info(&state);
 
-    // Run Semantic Passes
-    typecheck_program(&type_ctx);
-    
-    double t4 = now_seconds();
-    double t_sema = t4 - t3;
-    size_t mem_sema = arena_total_allocated(arena) - mem_before_sema;
-    (void)mem_sema;
-
-    // Reporting
-    if (opts.print_ast) {
-        printf("--- AST ---\n");
-        for (size_t i = 0; i < loader->units_ordered->count; i++) {
-            CompilationUnit *u = *(CompilationUnit**)dynarray_get(loader->units_ordered, i);
-            printf("Module: %s\n", u->absolute_path);
-            print_ast(u->ast_root, 0, keywords, identifiers, strings);
-        }
-    }
-
-    if (opts.print_types) {
-        // Pass the unit's GLOBAL SCOPE instead of the AST
-        CompilationUnit *main_unit = *(CompilationUnit**)dynarray_get(loader->units_ordered, loader->units_ordered->count - 1);
-        type_print_store_dump(store, main_unit->global_scope); 
-    }
-
-    // Check for Semantic Errors
-    if (type_ctx.errors->count > 0) {
-        for (size_t i = 0; i < type_ctx.errors->count; i++) {
-            TypeError *e = (TypeError*)dynarray_get(type_ctx.errors, i);
-            print_type_error(e);
-        }
-        exit_code = EXIT_TYPE;
-        goto cleanup;
-    }
-
-    // Code Generation
-    // ---------------------------------------------------------
-    if (opts.verbose) printf("Code Generation...\n");
-    double t5 = now_seconds();
-    CodegenContext *cg_ctx = codegen_context_create(store, "main_module", opts.opt_level, loader);
-    if (codegen_program(cg_ctx) == 0) {
-        if (opts.print_ir) codegen_dump_module(cg_ctx);
-
-#ifdef _WIN32
-        const char *obj_ext = ".obj";
-#else
-        const char *obj_ext = ".o";
-#endif
-
-        size_t obj_path_len = strlen(opts.output_name) + strlen(obj_ext) + 1;
-        char *obj_path = arena_alloc(arena, obj_path_len);
-        snprintf(obj_path, obj_path_len, "%s%s", opts.output_name, obj_ext);
-        codegen_emit_object(cg_ctx, obj_path);
-        
-        if (opts.verbose) printf("Linking...\n");
-
-        char *runtime_path = get_runtime_path();
-        
-        // Use "cc" as a generic name, or "clang" if on Windows
-#ifdef _WIN32
-        const char *linker = "clang";
-#else
-        const char *linker = "cc";
-#endif
-
-        char *link_args[] = { (char*)linker, obj_path, runtime_path, "-o", (char*)opts.output_name, NULL };
-        if (run_command(linker, link_args) == 0) {
-            if (opts.verbose) printf("Successfully compiled to '%s' executable.\n", opts.output_name);
-            free(runtime_path);
-
-            if (opts.run_executable) {
-                char *run_cmd;
-#ifdef _WIN32
-                size_t run_cmd_len = strlen(opts.output_name) + 1;
-                run_cmd = arena_alloc(arena, run_cmd_len);
-                snprintf(run_cmd, run_cmd_len, "%s", opts.output_name);
-#else
-                size_t run_cmd_len = strlen(opts.output_name) + 3;
-                run_cmd = arena_alloc(arena, run_cmd_len);
-                snprintf(run_cmd, run_cmd_len, "./%s", opts.output_name);
-#endif
-                char *run_args[] = { run_cmd, NULL };
-                run_command(run_cmd, run_args);
-            }
-        } else {
-            fprintf(stderr, "Error: Linking failed\n");
-            free(runtime_path);
-            exit_code = EXIT_IO;
-        }
-    } else {
-        fprintf(stderr, "Error: Code generation failed\n");
-        exit_code = EXIT_TYPE;
-    }
-    codegen_context_destroy(cg_ctx);
-    double t_codegen = now_seconds() - t5;
+    double t_cg_start = now_seconds();
+    exit_code = compiler_run_backend(&state);
+    double t_cg = now_seconds() - t_cg_start;
 
     if (opts.print_time) {
         printf("\n--- Metrics ---\n");
-        printf("Time Parse/Load: %.3fms\n", t_parse * 1000);
+        printf("Time Parse/Load: %.3fms\n", t_load * 1000);
         printf("Time Sema:       %.3fms\n", t_sema * 1000);
-        printf("Time Codegen:    %.3fms\n", t_codegen * 1000);
+        printf("Time Codegen:    %.3fms\n", t_cg * 1000);
         printf("Peak RSS:        %zu KB\n", get_peak_rss_kb());
     }
 
 cleanup:
-    if (arena) arena_destroy(arena);
+    arena_destroy(state.arena);
     return exit_code;
 }
