@@ -543,7 +543,7 @@ AstNode *parse_primary(Parser *p, ParseError *err) {
                     Token *peek_tok = current_token(p);
                     AstNode *arg = NULL;
                     
-                    if (peek_tok && (peek_tok->type >= TOK_I32 && peek_tok->type <= TOK_VOID)) {
+                    if (peek_tok && (peek_tok->type >= TOK_I8 && peek_tok->type <= TOK_VOID)) {
                          arg = parse_type(p, err);
                     } else {
                          arg = parse_expression(p, err);

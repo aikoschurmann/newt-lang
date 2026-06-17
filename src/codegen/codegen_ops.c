@@ -65,6 +65,11 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
                 unsigned dst_w = LLVMGetIntTypeWidth(dst_ty);
                 if (src_w == dst_w) return val;
                 if (src_w > dst_w)  return LLVMBuildTrunc(ctx->builder, val, dst_ty, "trunc");
+                
+                // Use ZExt for unsigned sources, SExt for signed
+                if (type_is_unsigned(cast_node->expr->type)) {
+                    return LLVMBuildZExt(ctx->builder, val, dst_ty, "zext");
+                }
                 return LLVMBuildSExt(ctx->builder, val, dst_ty, "sext");
             }
 

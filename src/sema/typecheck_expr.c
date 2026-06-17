@@ -1073,9 +1073,14 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         }
 
         if (allocated_type) {
-            Type proto = { .kind = TYPE_POINTER, .as.ptr.base = allocated_type };
-            InternResult *res = intern_type(ctx->store, &proto);
-            if (res && res->key) node->type = (Type*)((Slice*)res->key)->ptr;
+            // Context-aware allocation: If a slice is expected, return a slice instead of a pointer.
+            if (expected_type && expected_type->kind == TYPE_SLICE && expected_type->as.slice.base == allocated_type) {
+                 node->type = expected_type;
+            } else {
+                Type proto = { .kind = TYPE_POINTER, .as.ptr.base = allocated_type };
+                InternResult *res = intern_type(ctx->store, &proto);
+                if (res && res->key) node->type = (Type*)((Slice*)res->key)->ptr;
+            }
         }
 
         if (!node->type) node->type = ctx->store->t_void_ptr;
@@ -1097,9 +1102,9 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
         Type *alloc_ty = check_expression(ctx, scope, alloc_arg, NULL);
         validate_allocator_structure(ctx, alloc_arg, alloc_ty);
 
-        // 2. Arg 1: Must be a pointer
+        // 2. Arg 1: Must be a pointer or slice
         Type *ptr_ty = check_expression(ctx, scope, ptr_arg, NULL);
-        if (ptr_ty && ptr_ty->kind != TYPE_POINTER) {
+        if (ptr_ty && ptr_ty->kind != TYPE_POINTER && ptr_ty->kind != TYPE_SLICE) {
             TypeError err = { .kind = TE_TYPE_MISMATCH, .span = ptr_arg->span, .filename = ctx->filename };
             err.as.mismatch.expected = ctx->store->t_void_ptr; 
             err.as.mismatch.actual = ptr_ty;

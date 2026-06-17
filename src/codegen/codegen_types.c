@@ -66,8 +66,14 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
         case TYPE_VOID: res = LLVMVoidTypeInContext(ctx->context); break;
         case TYPE_PRIMITIVE:
             switch (t->as.primitive) {
-                case PRIM_I32:  res = LLVMInt32TypeInContext(ctx->context); break;
-                case PRIM_I64:  res = LLVMInt64TypeInContext(ctx->context); break;
+                case PRIM_I8:
+                case PRIM_U8:   res = LLVMInt8TypeInContext(ctx->context); break;
+                case PRIM_I16:
+                case PRIM_U16:  res = LLVMInt16TypeInContext(ctx->context); break;
+                case PRIM_I32:
+                case PRIM_U32:  res = LLVMInt32TypeInContext(ctx->context); break;
+                case PRIM_I64:
+                case PRIM_U64:  res = LLVMInt64TypeInContext(ctx->context); break;
                 case PRIM_F32:  res = LLVMFloatTypeInContext(ctx->context); break;
                 case PRIM_F64:  res = LLVMDoubleTypeInContext(ctx->context); break;
                 case PRIM_BOOL: res = LLVMInt8TypeInContext(ctx->context); break;

@@ -19,16 +19,32 @@ bool type_can_implicit_cast(Type *target, Type *source) {
         PrimitiveKind s = source->as.primitive;
         PrimitiveKind t = target->as.primitive;
 
-        // i32 -> i64 (Lossless)
+        // Same signedness widening
+        if (s == PRIM_I8  && (t == PRIM_I16 || t == PRIM_I32 || t == PRIM_I64)) return true;
+        if (s == PRIM_I16 && (t == PRIM_I32 || t == PRIM_I64)) return true;
         if (s == PRIM_I32 && t == PRIM_I64) return true;
-        // f32 -> f64 (Lossless)
-        if (s == PRIM_F32 && t == PRIM_F64) return true;
-        // i32 -> f64 (Exact in 53-bit mantissa)
-        if (s == PRIM_I32 && t == PRIM_F64) return true;
 
-        // NOTE: i64 -> f64 is NOT implicit (precision loss for large values)
-        // NOTE: i32 -> f32 is NOT implicit (precision loss for large values)
-        // NOTE: No narrowing (i64 -> i32) is implicit.
+        if (s == PRIM_U8  && (t == PRIM_U16 || t == PRIM_U32 || t == PRIM_U64)) return true;
+        if (s == PRIM_U16 && (t == PRIM_U32 || t == PRIM_U64)) return true;
+        if (s == PRIM_U32 && t == PRIM_U64) return true;
+
+        // Unsigned to Signed widening (must have at least one extra bit)
+        if (s == PRIM_U8  && (t == PRIM_I16 || t == PRIM_I32 || t == PRIM_I64)) return true;
+        if (s == PRIM_U16 && (t == PRIM_I32 || t == PRIM_I64)) return true;
+        if (s == PRIM_U32 && t == PRIM_I64) return true;
+
+        // Float widening
+        if (s == PRIM_F32 && t == PRIM_F64) return true;
+
+        // Integer to Float widening (Lossless)
+        if (t == PRIM_F64) {
+            // i32 fits in f64 mantissa (53 bits)
+            if (s == PRIM_I8 || s == PRIM_I16 || s == PRIM_I32 || s == PRIM_U8 || s == PRIM_U16 || s == PRIM_U32) return true;
+        }
+        if (t == PRIM_F32) {
+            // i16 fits in f32 mantissa (24 bits)
+            if (s == PRIM_I8 || s == PRIM_I16 || s == PRIM_U8 || s == PRIM_U16) return true;
+        }
     }
 
     // 2. Array Decay (T[N] -> T[])
@@ -79,12 +95,13 @@ bool type_can_explicit_cast(Type *target, Type *source) {
     if (source->kind == TYPE_POINTER && target->kind == TYPE_POINTER) {
         return true;
     }
-    // 4. Pointer <-> i64 (Bit reinterpretation)
+    // 4. Pointer <-> 64-bit Integer (Bit reinterpretation)
     if ((source->kind == TYPE_POINTER && type_is_integer(target)) ||
         (type_is_integer(source) && target->kind == TYPE_POINTER)) {
 
         Type *int_type = (source->kind == TYPE_POINTER) ? target : source;
-        if (int_type->kind == TYPE_PRIMITIVE && int_type->as.primitive == PRIM_I64) {
+        if (int_type->kind == TYPE_PRIMITIVE && 
+            (int_type->as.primitive == PRIM_I64 || int_type->as.primitive == PRIM_U64)) {
             return true;
         }
     }

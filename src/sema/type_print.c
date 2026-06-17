@@ -47,8 +47,14 @@ static void type_print_internal(FILE *out, const Type *type) {
             
         case TYPE_PRIMITIVE: {
             switch (type->as.primitive) {
+                case PRIM_I8:   fprintf(out, "i8"); break;
+                case PRIM_I16:  fprintf(out, "i16"); break;
                 case PRIM_I32:  fprintf(out, "i32"); break;
                 case PRIM_I64:  fprintf(out, "i64"); break;
+                case PRIM_U8:   fprintf(out, "u8"); break;
+                case PRIM_U16:  fprintf(out, "u16"); break;
+                case PRIM_U32:  fprintf(out, "u32"); break;
+                case PRIM_U64:  fprintf(out, "u64"); break;
                 case PRIM_F32:  fprintf(out, "f32"); break;
                 case PRIM_F64:  fprintf(out, "f64"); break;
                 case PRIM_BOOL: fprintf(out, "bool"); break;
@@ -62,13 +68,13 @@ static void type_print_internal(FILE *out, const Type *type) {
             break;
         }
         case TYPE_ARRAY: {
-            fprintf(out, "[%lld]", (long long)type->as.array.size);
             type_print_internal(out, type->as.array.base);
+            fprintf(out, "[%lld]", (long long)type->as.array.size);
             break;
         }
         case TYPE_SLICE: {
-            fprintf(out, "[]");
             type_print_internal(out, type->as.slice.base);
+            fprintf(out, "[]");
             break;
         }
         case TYPE_STRUCT: {

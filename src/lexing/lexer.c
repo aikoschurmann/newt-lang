@@ -40,8 +40,14 @@ static const struct {
     {"alias", TOK_ALIAS},
     {"struct", TOK_STRUCT},
     {"as", TOK_AS},
+    {"i8", TOK_I8},
+    {"i16", TOK_I16},
     {"i32", TOK_I32},
     {"i64", TOK_I64},
+    {"u8", TOK_U8},
+    {"u16", TOK_U16},
+    {"u32", TOK_U32},
+    {"u64", TOK_U64},
     {"bool", TOK_BOOL},
     {"f32", TOK_F32},
     {"f64", TOK_F64},
@@ -580,8 +586,14 @@ const char* token_type_to_string(TokenKind type) {
         case TOK_IMPORT: return "IMPORT";
         case TOK_ALIAS: return "ALIAS";
         case TOK_STRUCT: return "STRUCT";
+        case TOK_I8: return "I8";
+        case TOK_I16: return "I16";
         case TOK_I32: return "I32";
         case TOK_I64: return "I64";
+        case TOK_U8: return "U8";
+        case TOK_U16: return "U16";
+        case TOK_U32: return "U32";
+        case TOK_U64: return "U64";
         case TOK_BOOL: return "BOOL";
         case TOK_F32: return "F32";
         case TOK_F64: return "F64";
@@ -631,6 +643,7 @@ const char* token_type_to_string(TokenKind type) {
         case TOK_AS: return "AS";
         case TOK_VOID: return "VOID";
         case TOK_DEFER: return "DEFER";
+        case TOK_NULL: return "NULL";
         default: return "UNKNOWN";
     }
 }

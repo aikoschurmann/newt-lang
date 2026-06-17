@@ -26,8 +26,14 @@ typedef enum {
     TOK_DEFER,
 
     // types
+    TOK_I8,
+    TOK_I16,
     TOK_I32,
     TOK_I64,
+    TOK_U8,
+    TOK_U16,
+    TOK_U32,
+    TOK_U64,
     TOK_BOOL,
     TOK_F32,
     TOK_F64,

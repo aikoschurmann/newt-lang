@@ -161,12 +161,12 @@ AstNode *parse_type_atom(Parser *p, ParseError *err) {
     }
 
     // Handle paths: std.mem.Allocator or just i32
-    if ((tok->type >= TOK_I32 && tok->type <= TOK_VOID) || tok->type == TOK_IDENTIFIER) {
+    if ((tok->type >= TOK_I8 && tok->type <= TOK_VOID) || tok->type == TOK_IDENTIFIER) {
         AstNode *type_node = new_node_or_err(p, AST_TYPE, err, "out of memory creating type node");
         if (!type_node) return NULL;
         type_node->data.ast_type.kind = AST_TYPE_PRIMITIVE;
 
-        if (tok->type >= TOK_I32 && tok->type <= TOK_VOID) {
+        if (tok->type >= TOK_I8 && tok->type <= TOK_VOID) {
             type_node->data.ast_type.u.base.intern_result = tok->record;
             type_node->data.ast_type.u.base.path = NULL;
             type_node->data.ast_type.span = tok->span;

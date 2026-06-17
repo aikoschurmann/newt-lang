@@ -32,7 +32,9 @@ static LLVMValueRef codegen_expr_intrinsic(CodegenContext *ctx, AstNode *expr) {
 
         // 1. Target Type Extraction
         Type *target_type = expr->type;
-        if (target_type->kind == TYPE_POINTER) target_type = target_type->as.ptr.base;
+        if (target_type->kind == TYPE_SLICE) target_type = target_type->as.slice.base;
+        else if (target_type->kind == TYPE_POINTER) target_type = target_type->as.ptr.base;
+        
         LLVMTypeRef llvm_target_type = get_llvm_type(ctx, target_type);
 
         // 2. Compute Allocation Size (count * sizeof(T))
@@ -71,7 +73,18 @@ static LLVMValueRef codegen_expr_intrinsic(CodegenContext *ctx, AstNode *expr) {
         LLVMValueRef call_args[] = { ctx_val, total_bytes };
         LLVMValueRef raw_mem = LLVMBuildCall2(ctx->builder, alloc_fn_ty, alloc_fn, call_args, 2, "raw_mem");
 
-        return LLVMBuildBitCast(ctx->builder, raw_mem, LLVMPointerType(llvm_target_type, 0), "typed_mem");
+        LLVMValueRef typed_ptr = LLVMBuildBitCast(ctx->builder, raw_mem, LLVMPointerType(llvm_target_type, 0), "typed_mem");
+        
+        // Construct fat pointer if slice is expected
+        if (expr->type->kind == TYPE_SLICE) {
+            LLVMTypeRef slice_ty = get_llvm_type(ctx, expr->type);
+            LLVMValueRef fat = LLVMGetUndef(slice_ty);
+            fat = LLVMBuildInsertValue(ctx->builder, fat, typed_ptr, 0, "fat_ptr");
+            fat = LLVMBuildInsertValue(ctx->builder, fat, LLVMBuildIntCast(ctx->builder, count_val, i64ty, "len_cast"), 1, "fat_len");
+            return fat;
+        }
+        
+        return typed_ptr;
     }
     else if (kind == INTRINSIC_FREE) {
         AstNode *allocator_arg = *(AstNode**)dynarray_get(args, args->count == 3 ? 1 : 0);
@@ -98,6 +111,11 @@ static LLVMValueRef codegen_expr_intrinsic(CodegenContext *ctx, AstNode *expr) {
 
         LLVMValueRef ctx_val = LLVMBuildExtractValue(ctx->builder, allocator_val, (unsigned)ctx_idx, "ctx_val");
         LLVMValueRef free_fn = LLVMBuildExtractValue(ctx->builder, allocator_val, (unsigned)free_idx, "free_fn_val");
+
+        // If passing a slice, extract the raw pointer member (index 0)
+        if (ptr_arg->type->kind == TYPE_SLICE) {
+            ptr_val = LLVMBuildExtractValue(ctx->builder, ptr_val, 0, "slice_ptr_to_free");
+        }
 
         // Invoke Custom Free
         LLVMTypeRef void_ty = LLVMVoidTypeInContext(ctx->context);

@@ -107,6 +107,10 @@ static int type_comparator(void *a, void *b) {
             if (ta->as.array.size != tb->as.array.size) return 1;
             return (ta->as.array.base == tb->as.array.base) ? 0 : 1;
 
+        case TYPE_SLICE:
+            // Compare element type pointer
+            return (ta->as.slice.base == tb->as.slice.base) ? 0 : 1;
+
         case TYPE_FUNCTION:
             // Compare Return Type (pointer check)
             if (ta->as.func.return_type != tb->as.func.return_type) return 1;
@@ -242,8 +246,15 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
     ts->primitive_registry = hashmap_create(arena, 64);
 
     // Create canonical primitives
+    ts->t_i8  = create_primitive(ts, PRIM_I8);
+    ts->t_i16 = create_primitive(ts, PRIM_I16);
     ts->t_i32 = create_primitive(ts, PRIM_I32);
     ts->t_i64 = create_primitive(ts, PRIM_I64);
+
+    ts->t_u8  = create_primitive(ts, PRIM_U8);
+    ts->t_u16 = create_primitive(ts, PRIM_U16);
+    ts->t_u32 = create_primitive(ts, PRIM_U32);
+    ts->t_u64 = create_primitive(ts, PRIM_U64);
 
     ts->t_f32 = create_primitive(ts, PRIM_F32);
     ts->t_f64 = create_primitive(ts, PRIM_F64);
@@ -272,8 +283,14 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
    
 
     // Register KEYWORDS (lexed as TOK_I32 etc.)
+    register_prim(ts, keywords, "i8",  ts->t_i8);
+    register_prim(ts, keywords, "i16", ts->t_i16);
     register_prim(ts, keywords, "i32", ts->t_i32);
     register_prim(ts, keywords, "i64", ts->t_i64);
+    register_prim(ts, keywords, "u8",  ts->t_u8);
+    register_prim(ts, keywords, "u16", ts->t_u16);
+    register_prim(ts, keywords, "u32", ts->t_u32);
+    register_prim(ts, keywords, "u64", ts->t_u64);
     register_prim(ts, keywords, "f32", ts->t_f32);
     register_prim(ts, keywords, "f64", ts->t_f64);
     register_prim(ts, keywords, "bool", ts->t_bool);

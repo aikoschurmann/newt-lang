@@ -4,18 +4,38 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #ifdef _WIN32
     #include <windows.h>
-    // MSYS2 handles stat and S_ISDIR natively. 
-    // We only redefine them if they are strictly missing (e.g., pure MSVC)
+    #include <io.h>
+    #include <fcntl.h>
     #ifndef S_ISDIR
         #define stat _stat
         #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
     #endif
+    #define dup _dup
+    #define dup2 _dup2
+    #define pipe(fds) _pipe(fds, 4096, _O_BINARY)
+    #define read _read
+    #define close _close
 #else
     #include <dirent.h>
+    #include <unistd.h>
 #endif
+
+static char* read_entire_file(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* buf = malloc(size + 1);
+    fread(buf, 1, size, f);
+    buf[size] = '\0';
+    fclose(f);
+    return buf;
+}
 
 static int run_single_fixture(const char *dir_path, const char *name) {
     Arena *arena = arena_create(4 * 1024 * 1024);
@@ -36,16 +56,15 @@ static int run_single_fixture(const char *dir_path, const char *name) {
         arena_destroy(arena);
         return 0;
     }
-// 5. Sema
-TypeStore *store = typestore_create(arena, identifiers, keywords);
-TypeCheckContext sema_ctx = typecheck_context_create(arena, store, identifiers, keywords, main_path, loader);
-typecheck_program(&sema_ctx);
 
+    TypeStore *store = typestore_create(arena, identifiers, keywords);
+    TypeCheckContext sema_ctx = typecheck_context_create(arena, store, identifiers, keywords, main_path, loader);
+    typecheck_program(&sema_ctx);
 
     char expect_path[512];
     snprintf(expect_path, sizeof(expect_path), "%s/expect.txt", dir_path);
-    FILE *f = fopen(expect_path, "r");
-    if (!f) {
+    char *expect_content = read_entire_file(expect_path);
+    if (!expect_content) {
         if (sema_ctx.errors->count > 0) {
             test_log("      %s✗%s %-30s (Unexpected sema errors)\n", COL_RED, COL_RESET, name);
             arena_destroy(arena);
@@ -57,53 +76,96 @@ typecheck_program(&sema_ctx);
     }
 
     int success = 1;
-    char line[256];
-    while (fgets(line, sizeof(line), f)) {
-        line[strcspn(line, "\n")] = 0;
-        if (strncmp(line, "error:", 6) == 0) {
-            const char *count_str = line + 6;
-            while (*count_str == ' ') count_str++;
+    int expected_errors = -1;
+    int expected_exit = -1;
+    char *expected_output = malloc(strlen(expect_content) + 1);
+    expected_output[0] = '\0';
+    size_t out_pos = 0;
 
-            if (*count_str >= '0' && *count_str <= '9') {
-                int expected_errors = atoi(count_str);
-                if ((int)sema_ctx.errors->count != expected_errors) {
-                    test_log("      %s✗%s %-30s (Error count mismatch: %zu != %d)\n", COL_RED, COL_RESET, name, sema_ctx.errors->count, expected_errors);
-                    success = 0;
-                }
-            } else {
-                if (sema_ctx.errors->count == 0) {
-                    test_log("      %s✗%s %-30s (Expected error, but passed)\n", COL_RED, COL_RESET, name);
-                    success = 0;
-                }
-            }
+    char *saveptr;
+    char *content_copy = strdup(expect_content);
+    char *line = strtok_r(content_copy, "\n", &saveptr);
+    while (line) {
+        if (strncmp(line, "error:", 6) == 0) {
+            expected_errors = atoi(line + 6);
+        } else if (strncmp(line, "exit:", 5) == 0) {
+            expected_exit = atoi(line + 5);
+        } else {
+            size_t len = strlen(line);
+            memcpy(expected_output + out_pos, line, len);
+            out_pos += len;
+            expected_output[out_pos++] = '\n';
+            expected_output[out_pos] = '\0';
         }
-        else if (strncmp(line, "exit:", 5) == 0) {
-            if (sema_ctx.errors->count > 0) {
-                test_log("      %s✗%s %-30s (Sema errors occurred, skipping codegen)\n", COL_RED, COL_RESET, name);
-                success = 0;
-            } else {
-                int expected_exit = atoi(line + 5);
-                CodegenContext *cg_ctx = codegen_context_create(store, "jit_module", 0, loader);
-                if (codegen_program(cg_ctx) == 0) {
-                    int actual_exit = codegen_run_jit(cg_ctx);
-                    if (actual_exit != expected_exit) {
-                        test_log("      %s✗%s %-30s (Exit code: %d != %d)\n", COL_RED, COL_RESET, name, actual_exit, expected_exit);
-                        success = 0;
-                    }
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+    free(content_copy);
+
+    if (expected_errors != -1) {
+        if ((int)sema_ctx.errors->count != expected_errors) {
+            test_log("      %s✗%s %-30s (Error count mismatch: %zu != %d)\n", COL_RED, COL_RESET, name, sema_ctx.errors->count, expected_errors);
+            success = 0;
+        }
+    } else if (sema_ctx.errors->count > 0) {
+        test_log("      %s✗%s %-30s (Unexpected sema errors)\n", COL_RED, COL_RESET, name);
+        success = 0;
+    }
+
+    if (success && (expected_exit != -1 || out_pos > 0)) {
+        CodegenContext *cg_ctx = codegen_context_create(store, "jit_module", 0, loader);
+        if (codegen_program(cg_ctx) == 0) {
+            int pipe_fds[2];
+            int stdout_save = -1;
+            
+            if (out_pos > 0) {
+                fflush(stdout);
+                stdout_save = dup(STDOUT_FILENO);
+                if (pipe(pipe_fds) != 0) {
+                    test_log("      %s✗%s %-30s (Failed to create pipe)\n", COL_RED, COL_RESET, name);
+                    success = 0;
                 } else {
-                    test_log("      %s✗%s %-30s (Codegen failed)\n", COL_RED, COL_RESET, name);
+                    dup2(pipe_fds[1], STDOUT_FILENO);
+                    close(pipe_fds[1]);
+                }
+            }
+
+            int actual_exit = codegen_run_jit(cg_ctx);
+
+            if (out_pos > 0 && success) {
+                fflush(stdout);
+                dup2(stdout_save, STDOUT_FILENO);
+                close(stdout_save);
+
+                char actual_output[8192]; // Adjust buffer size as needed
+                ssize_t n = read(pipe_fds[0], actual_output, sizeof(actual_output) - 1);
+                if (n < 0) n = 0;
+                actual_output[n] = '\0';
+                close(pipe_fds[0]);
+
+                if (strcmp(actual_output, expected_output) != 0) {
+                    test_log("      %s✗%s %-30s (Output mismatch)\n", COL_RED, COL_RESET, name);
+                    // Optional: diff print
                     success = 0;
                 }
-                codegen_context_destroy(cg_ctx);
             }
+
+            if (success && expected_exit != -1 && actual_exit != expected_exit) {
+                test_log("      %s✗%s %-30s (Exit code: %d != %d)\n", COL_RED, COL_RESET, name, actual_exit, expected_exit);
+                success = 0;
+            }
+        } else {
+            test_log("      %s✗%s %-30s (Codegen failed)\n", COL_RED, COL_RESET, name);
+            success = 0;
         }
+        codegen_context_destroy(cg_ctx);
     }
 
     if (success) {
         test_log("      %s✓%s %-30s\n", COL_GREEN, COL_RESET, name);
     }
 
-    fclose(f);
+    free(expected_output);
+    free(expect_content);
     arena_destroy(arena);
     return success;
 }

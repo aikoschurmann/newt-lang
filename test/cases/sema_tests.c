@@ -15,6 +15,7 @@
 #include "sema_overload_forbidden.inc"
 #include "sema_overload.inc"
 #include "sema_ops.inc"
+#include "sema_slices.inc"
 
 #undef SEMA_VALID
 #undef SEMA_ERROR
