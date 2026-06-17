@@ -1,1 +1,55 @@
-fn main() { a: bool = 1 < 1.0; }
+import std;
+import std.math;
+
+alias Allocator = std.mem.Allocator;
+alias Arena = std.arena.Arena;
+
+pub struct Node {
+    val: i32;
+    next: *Node;
+}
+
+fn main() -> i32 {
+    arena: Arena = Arena.new(1024);
+    defer { arena.destroy(); }
+
+    a: Allocator = arena.get_allocator();
+
+    head: *Node = null;
+    tail: *Node = null;
+
+    // 1. Build the linked list
+    for (i: i32 = 1; i <= 5; i += 1) {
+        node: *Node = @alloc(Node, a, 1);
+        if node == null {
+            print("Allocation failed!\n");
+            return 1;
+        }
+
+        node.val = i * 10;
+        node.next = null;
+
+        if head == null {
+            head = node;
+        } else {
+            tail.next = node;
+        }
+        tail = node;
+    }
+
+    // 2. Traverse the list and process values
+    total: f64 = 0.0;
+    curr: *Node = head;
+
+    while curr != null {
+        sqr: f64 = (curr.val * curr.val) as f64;
+        s: f64 = std.math.sqrt(sqr);
+        print("Val: ", curr.val, ", Sqr: ", sqr, ", Sqrt: ", s, "\n");
+
+        total += sqr;
+        curr = curr.next;
+    }
+
+    print("Total accumulated sqr: ", total, "\n");
+    return 0;
+}

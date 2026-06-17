@@ -30,3 +30,25 @@ pub fn exit(code: i32) -> void;
 
 @link("abort")
 pub fn abort() -> void;
+
+// Math
+@link("sqrt")  pub fn sqrt(x: f64) -> f64;
+@link("sin")   pub fn sin(x: f64) -> f64;
+@link("cos")   pub fn cos(x: f64) -> f64;
+@link("tan")   pub fn tan(x: f64) -> f64;
+@link("asin")  pub fn asin(x: f64) -> f64;
+@link("acos")  pub fn acos(x: f64) -> f64;
+@link("atan")  pub fn atan(x: f64) -> f64;
+@link("atan2") pub fn atan2(y: f64, x: f64) -> f64;
+
+@link("pow")   pub fn pow(base: f64, exp: f64) -> f64;
+@link("exp")   pub fn exp(x: f64) -> f64;
+@link("log")   pub fn log(x: f64) -> f64;
+@link("log10") pub fn log10(x: f64) -> f64;
+@link("log2")  pub fn log2(x: f64) -> f64;
+
+@link("floor") pub fn floor(x: f64) -> f64;
+@link("ceil")  pub fn ceil(x: f64) -> f64;
+@link("round") pub fn round(x: f64) -> f64;
+@link("fabs")  pub fn fabs(x: f64) -> f64;
+@link("fmod")  pub fn fmod(x: f64, y: f64) -> f64;

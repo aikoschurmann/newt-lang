@@ -103,6 +103,13 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
             if ((src_k == LLVMFloatTypeKind || src_k == LLVMDoubleTypeKind) &&
                 dst_k == LLVMIntegerTypeKind)
                 return LLVMBuildFPToSI(ctx->builder, val, dst_ty, "fptosi");
+            if ((src_k == LLVMFloatTypeKind || src_k == LLVMDoubleTypeKind) &&
+                (dst_k == LLVMFloatTypeKind || dst_k == LLVMDoubleTypeKind)) {
+                if (dst_k == LLVMDoubleTypeKind)
+                    return LLVMBuildFPExt(ctx->builder, val, dst_ty, "fpext");
+                else
+                    return LLVMBuildFPTrunc(ctx->builder, val, dst_ty, "fptrunc");
+            }
         }
         return LLVMBuildBitCast(ctx->builder, val, dst_ty, "bitcast");
     }
