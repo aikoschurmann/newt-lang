@@ -334,7 +334,7 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
     if (!primary) return NULL;
 
     Token *token = current_token(p);
-    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT || token->type == TOK_LBRACE)) {
+    while (token && (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS || token->type == TOK_LBRACKET || token->type == TOK_LPAREN || token->type == TOK_DOT || token->type == TOK_LBRACE || token->type == TOK_LT)) {
         if (token->type == TOK_PLUSPLUS || token->type == TOK_MINUSMINUS) {
             Token *op_tok = token;
             AstNode *postfix = new_node_or_err(p, AST_UNARY_EXPR, err, "out of memory creating postfix node");
@@ -346,6 +346,51 @@ AstNode *parse_postfix(Parser *p, ParseError *err) {
 
             consume(p, op_tok->type);
             primary = postfix;
+
+        } else if (token->type == TOK_LT) {
+            size_t checkpoint = p->current;
+            ParseError ignored_err = {0};
+            consume(p, TOK_LT);
+
+            DynArray *type_args = alloc_dynarray(p, NULL, sizeof(AstNode*), 2, "out of memory");
+            bool success = true;
+
+            // Try to parse at least one type
+            AstNode *first_arg = parse_type(p, &ignored_err);
+            if (!first_arg) {
+                success = false;
+            } else {
+                dynarray_push_value(type_args, &first_arg);
+                while (parser_match(p, TOK_COMMA)) {
+                    AstNode *next_arg = parse_type(p, &ignored_err);
+                    if (!next_arg) { success = false; break; }
+                    dynarray_push_value(type_args, &next_arg);
+                }
+            }
+
+            Token *rgt = current_token(p);
+            if (success && rgt && rgt->type == TOK_GT) {
+                consume(p, TOK_GT);
+                // Potential generic instantiation. 
+                // Heuristic: Must be followed by (, {, or . (for methods)
+                Token *after = current_token(p);
+                if (after && (after->type == TOK_LPAREN || after->type == TOK_LBRACE || after->type == TOK_DOT)) {
+                    AstNode *inst = new_node_or_err(p, AST_GENERIC_INST_EXPR, err, "out of memory");
+                    if (!inst) return NULL;
+                    inst->data.generic_inst_expr.base = primary;
+                    inst->data.generic_inst_expr.type_args = type_args;
+                    inst->span = span_join(&primary->span, &rgt->span);
+                    primary = inst;
+                } else {
+                    // It was a comparison like `a < b > c`
+                    p->current = checkpoint;
+                    break; 
+                }
+            } else {
+                // Not a valid type list or no closing >
+                p->current = checkpoint;
+                break; // Let binary expression parser handle it
+            }
 
         } else if (token->type == TOK_LBRACKET) {
             consume(p, TOK_LBRACKET);

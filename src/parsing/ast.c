@@ -50,6 +50,7 @@ static const char *type_kind_to_string(AstTypeKind kind) {
         case AST_TYPE_PTR: return "PointerType";
         case AST_TYPE_ARRAY: return "ArrayType";
         case AST_TYPE_FUNC: return "FunctionType";
+        case AST_TYPE_APPLICATION: return "TypeApplication";
         default: return "UnknownType";
     }
 }
@@ -866,7 +867,7 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
                 case AST_TYPE_FUNC: {
                     int has_return = node->data.ast_type.u.func.return_type != NULL;
                     int has_params = node->data.ast_type.u.func.param_types && node->data.ast_type.u.func.param_types->count > 0;
-                    
+
                     if (has_params) {
                         print_tree_prefix(depth + 1, !has_return);
                         printf("parameters:\n");
@@ -879,6 +880,23 @@ void print_ast_with_prefix(AstNode *node, int depth, int is_last, DenseArenaInte
                         print_tree_prefix(depth + 1, 1);
                         printf("return_type:\n");
                         print_ast_with_prefix(node->data.ast_type.u.func.return_type, depth + 2, 1, keywords, identifiers, strings);
+                    }
+                    break;
+                }
+
+                case AST_TYPE_APPLICATION: {
+                    if (node->data.ast_type.u.application.base) {
+                        print_tree_prefix(depth + 1, 0);
+                        printf("base:\n");
+                        print_ast_with_prefix(node->data.ast_type.u.application.base, depth + 2, 0, keywords, identifiers, strings);
+                    }
+                    if (node->data.ast_type.u.application.args && node->data.ast_type.u.application.args->count > 0) {
+                        print_tree_prefix(depth + 1, 1);
+                        printf("type_args:\n");
+                        for (size_t i = 0; i < node->data.ast_type.u.application.args->count; ++i) {
+                            AstNode *arg = *(AstNode**)dynarray_get(node->data.ast_type.u.application.args, i);
+                            print_ast_with_prefix(arg, depth + 2, i == node->data.ast_type.u.application.args->count - 1, keywords, identifiers, strings);
+                        }
                     }
                     break;
                 }

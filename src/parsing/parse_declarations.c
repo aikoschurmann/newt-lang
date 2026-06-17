@@ -308,7 +308,27 @@ AstNode *parse_struct_declaration(Parser *p, ParseError *err) {
         return NULL;
     }
     decl->data.struct_declaration.intern_result = name_tok->record;
-    
+
+    DynArray *type_params = NULL;
+    if (current_token(p) && current_token(p)->type == TOK_LT) {
+        consume(p, TOK_LT);
+        type_params = arena_alloc(p->arena, sizeof(DynArray));
+        if (!type_params) {
+            if (err) create_parse_error(err, p, "out of memory for type params", NULL);
+            return NULL;
+        }
+        dynarray_init_in_arena(type_params, p->arena, sizeof(InternResult*), 2);
+
+        do {
+            Token *tp = consume(p, TOK_IDENTIFIER);
+            if (!tp) { create_parse_error(err, p, "expected type parameter name", current_token(p)); return NULL; }
+            dynarray_push_value(type_params, &tp->record);
+        } while (parser_match(p, TOK_COMMA));
+
+        if (!consume(p, TOK_GT)) { create_parse_error(err, p, "expected '>' after type parameters", current_token(p)); return NULL; }
+    }
+    decl->data.struct_declaration.type_params = type_params;
+
     decl->data.struct_declaration.fields = arena_alloc(p->arena, sizeof(DynArray));
     if (!decl->data.struct_declaration.fields) {
         if (err) create_parse_error(err, p, "out of memory allocating struct fields array", current_token(p));
@@ -480,6 +500,26 @@ AstNode *parse_function_declaration(Parser *p, ParseError *err) {
 
     func_decl->data.function_declaration.intern_result = name_tok->record;
     func_decl->data.function_declaration.target_type_node = target_type;
+
+    DynArray *type_params = NULL;
+    if (current_token(p) && current_token(p)->type == TOK_LT) {
+        consume(p, TOK_LT);
+        type_params = arena_alloc(p->arena, sizeof(DynArray));
+        if (!type_params) {
+            if (err) create_parse_error(err, p, "out of memory for type params", NULL);
+            return NULL;
+        }
+        dynarray_init_in_arena(type_params, p->arena, sizeof(InternResult*), 2);
+
+        do {
+            Token *tp = consume(p, TOK_IDENTIFIER);
+            if (!tp) { create_parse_error(err, p, "expected type parameter name", current_token(p)); return NULL; }
+            dynarray_push_value(type_params, &tp->record);
+        } while (parser_match(p, TOK_COMMA));
+
+        if (!consume(p, TOK_GT)) { create_parse_error(err, p, "expected '>' after type parameters", current_token(p)); return NULL; }
+    }
+    func_decl->data.function_declaration.type_params = type_params;
 
     /* parameters */
     if (!consume(p, TOK_LPAREN)) { create_parse_error(err, p, "expected '(' after function name", current_token(p)); return NULL; }

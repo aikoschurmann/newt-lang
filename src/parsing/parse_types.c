@@ -72,6 +72,33 @@ AstNode *parse_type(Parser *p, ParseError *err) {
 
     token = current_token(p);
 
+    /* Handle generic type arguments: Vec<i32, bool> */
+    if (token && token->type == TOK_LT) {
+        consume(p, TOK_LT);
+        DynArray *type_args = alloc_dynarray(p, err, sizeof(AstNode*), 4, "out of memory for type args");
+        if (!type_args) return NULL;
+
+        do {
+            AstNode *arg = parse_type(p, err);
+            if (!arg) return NULL;
+            dynarray_push_value(type_args, &arg);
+            if (current_token(p) && current_token(p)->type == TOK_GT) break;
+        } while (parser_match(p, TOK_COMMA));
+
+        Token *rgt = consume(p, TOK_GT);
+        if (!rgt) { if (err) create_parse_error(err, p, "expected '>'", current_token(p)); return NULL; }
+
+        AstNode *app_type = new_node_or_err(p, AST_TYPE, err, "out of memory");
+        if (!app_type) return NULL;
+        app_type->data.ast_type.kind = AST_TYPE_APPLICATION;
+        app_type->data.ast_type.u.application.base = base;
+        app_type->data.ast_type.u.application.args = type_args;
+        app_type->span = span_join(&base->span, &rgt->span);
+
+        base = app_type;
+        token = current_token(p);
+    }
+
     /* arrays: [ <const-expr>? ] */
     /* Parse dimensions into a list, then wrap REVERSELY (Right-to-Left) */
     DynArray *dims = alloc_dynarray(p, err, sizeof(AstNode*), 4, "out of memory for array dimensions");

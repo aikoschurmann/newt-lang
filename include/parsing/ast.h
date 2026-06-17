@@ -46,6 +46,7 @@ typedef enum {
     AST_POSTFIX_EXPR,
     AST_ASSIGNMENT_EXPR,
     AST_CALL_EXPR,
+    AST_GENERIC_INST_EXPR, // new: base<T1, T2>
     AST_SUBSCRIPT_EXPR,
     AST_MEMBER_EXPR,
     AST_STRUCT_LITERAL,
@@ -107,6 +108,7 @@ typedef struct {
 typedef struct {
     AstNode *return_type;    /* AST_TYPE node, may be NULL */
     InternResult *intern_result;  /* interned record for the function name */
+    DynArray *type_params;   /* DynArray<InternResult*>, NULL if not generic */
     AstNode *target_type_node; /* AST_IDENTIFIER node for the struct this method is bound to (Optional) */
     DynArray *params;        /* AstParam nodes */
     AstNode *body;           /* AstBlock, may be NULL for @link */
@@ -147,6 +149,7 @@ typedef struct {
 
 typedef struct {
     InternResult *intern_result; // Struct name
+    DynArray *type_params;       // DynArray<InternResult*>, NULL if not generic
     DynArray *fields;            // Contains AstFieldDecl*
     int is_pub;                  // visibility
 } AstStructDeclaration;
@@ -199,6 +202,7 @@ typedef struct { OpKind op; AstNode *expr; } AstUnaryExpr;
 typedef struct { AstNode *expr; OpKind op; } AstPostfixExpr;
 typedef struct { AstNode *lvalue; AstNode *rvalue; OpKind op; } AstAssignmentExpr;
 typedef struct { AstNode *callee; DynArray *args; } AstCallExpr;
+typedef struct { AstNode *base; DynArray *type_args; } AstGenericInstExpr;
 typedef struct { AstNode *target; AstNode *index; } AstSubscriptExpr;
 typedef struct { AstNode *target; InternResult *member; Symbol *symbol; bool is_instance_method; bool self_injected; } AstMemberExpr;
 
@@ -224,7 +228,8 @@ typedef enum {
     AST_TYPE_PRIMITIVE,   // primitive type: i32, foo, etc. (holds interned id)
     AST_TYPE_PTR,    // pointer to inner type
     AST_TYPE_ARRAY,  // array of inner type with optional size expression
-    AST_TYPE_FUNC    // function type: params list + return type
+    AST_TYPE_FUNC,   // function type: params list + return type
+    AST_TYPE_APPLICATION // type with type arguments (e.g. Vec[i32])
 } AstTypeKind;
 
 typedef struct AstType {
@@ -246,6 +251,9 @@ typedef struct AstType {
 
         /* AST_TYPE_FUNC */
         struct { DynArray *param_types; AstNode *return_type; } func;
+
+        /* AST_TYPE_APPLICATION */
+        struct { AstNode *base; DynArray *args; } application;
     } u;
 } AstType;
 
@@ -304,6 +312,7 @@ struct AstNode {
         AstPostfixExpr postfix_expr;
         AstAssignmentExpr assignment_expr;
         AstCallExpr call_expr;
+        AstGenericInstExpr generic_inst_expr;
         AstSubscriptExpr subscript_expr;
         AstMemberExpr member_expr;
         AstStructLiteral struct_literal;

@@ -1,10 +1,10 @@
 # Engineering Audit
 
 ## Global Summary
-- **Total SLOC:** 9,995
+- **Total SLOC:** 10,114
 - **Total Functions:** 76
 - **Average CC:** 2.61
-- **Average Maintainability Index:** 83.21/100
+- **Average Maintainability Index:** 83.20/100
 
 ## Top 15 God Functions (By Cyclomatic Complexity)
 | CC | MI | Vol | LOC | Recursive | Function | File |
@@ -20,7 +20,7 @@
 | 7 | 48.1 | 271 | 36 | No | `hashmap_create` | src/datastructures/hash_map.c |
 | 7 | 46.9 | 229 | 43 | No | `fold_unary_op` | src/sema/typecheck_expr.c |
 | 7 | 51.4 | 221 | 27 | No | `define_symbol_or_error` | src/sema/symbol_utils.c |
-| 7 | 52.4 | 206 | 25 | No | `detect_base` | src/parsing/parse_expressions.c |
+| 7 | 52.0 | 206 | 26 | No | `detect_base` | src/parsing/parse_expressions.c |
 | 6 | 50.2 | 280 | 29 | No | `scope_create` | src/datastructures/scope.c |
 | 5 | 51.1 | 301 | 26 | No | `collect_llvm_param_types` | src/codegen/codegen_decl.c |
 | 4 | 46.4 | 162 | 53 | No | `print_primitive_kind` | src/sema/type_print.c |
