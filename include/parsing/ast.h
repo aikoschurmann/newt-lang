@@ -200,7 +200,7 @@ typedef struct { AstNode *expr; OpKind op; } AstPostfixExpr;
 typedef struct { AstNode *lvalue; AstNode *rvalue; OpKind op; } AstAssignmentExpr;
 typedef struct { AstNode *callee; DynArray *args; } AstCallExpr;
 typedef struct { AstNode *target; AstNode *index; } AstSubscriptExpr;
-typedef struct { AstNode *target; InternResult *member; Symbol *symbol; bool is_instance_method; } AstMemberExpr;
+typedef struct { AstNode *target; InternResult *member; Symbol *symbol; bool is_instance_method; bool self_injected; } AstMemberExpr;
 
 typedef struct {
     InternResult *name; // The field name

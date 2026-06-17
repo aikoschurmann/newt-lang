@@ -39,7 +39,8 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
                 if (!sym) ICE_AT(expr, "Alias '%s' resolved to NULL.", ((Slice*)ident->intern_result->key)->ptr);
 
                 CompilationUnit *origin_unit = module_loader_get_unit(ctx->loader, sym->filename);
-                char *mangled = mangle_name(ctx, origin_unit, sym->name_rec);
+                Type *fn_type = (sym->kind == SYMBOL_VALUE_FUNCTION) ? sym->type : NULL;
+                char *mangled = mangle_name(ctx, origin_unit, sym->name_rec, fn_type);
                 
                 // Globals could be functions or variables
                 LLVMValueRef val = LLVMGetNamedFunction(ctx->module, mangled);
@@ -115,7 +116,8 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
             CompilationUnit *u = module_loader_get_unit(ctx->loader, mem_expr->symbol->filename);
             if (!u) ICE("Failed to find CompilationUnit for symbol in '%s'", mem_expr->symbol->filename ? mem_expr->symbol->filename : "unknown");
             
-            char *mangled = mangle_name(ctx, u, mem_expr->member);
+            Type *fn_type = (mem_expr->symbol->kind == SYMBOL_VALUE_FUNCTION) ? mem_expr->symbol->type : NULL;
+            char *mangled = mangle_name(ctx, u, mem_expr->member, fn_type);
             LLVMValueRef val = LLVMGetNamedFunction(ctx->module, mangled);
             if (!val) val = LLVMGetNamedGlobal(ctx->module, mangled);
             

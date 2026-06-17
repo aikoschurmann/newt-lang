@@ -163,6 +163,12 @@ void print_type_error(TypeError *err) {
         case TE_RECURSIVE_CONST:
             fprintf(stderr, "Recursive constant definition detected (cycle).\n");
             break;
+        case TE_AMBIGUOUS_OVERLOAD:
+            fprintf(stderr, "Ambiguous call to overloaded function '%s%s%s'. Multiple undominated candidates remain.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            break;
+        case TE_NO_MATCHING_OVERLOAD:
+            fprintf(stderr, "No matching overload found for function '%s%s%s' with the given arguments.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            break;
         default:
             fprintf(stderr, "Unknown Semantic Error.\n");
             break;

@@ -24,7 +24,8 @@ typedef enum {
     SYMBOL_VARIABLE,      // General runtime variable
     SYMBOL_VALUE_MODULE,   // Added for imported modules
     SYMBOL_VALUE_NAMESPACE, // Added for synthetic namespace path components
-    SYMBOL_VALUE_ALIAS    // Added for local aliases
+    SYMBOL_VALUE_ALIAS,    // Added for local aliases
+    SYMBOL_OVERLOAD_SET    // Added for function overloading
 } SymbolValue;
 
 
@@ -65,6 +66,9 @@ typedef struct Symbol {
         // void *ptr_val; // For strings if you implement them
     } value; 
 
+    // For function overloading
+    DynArray *overloads; // DynArray<Symbol*>
+
 } Symbol;
 
 typedef struct Scope {
@@ -97,6 +101,10 @@ Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind)
 Symbol *scope_define_symbol(Scope *scope, InternResult *name, Type *type, SymbolValue kind, const char *filename, bool is_pub, AstNode *decl_node);
 Symbol *scope_lookup_symbol(Scope *scope, InternResult *name, const char *caller_filename);
 Symbol *scope_lookup_symbol_local(Scope *scope, InternResult *name);
+
+// Overload set helpers
+Symbol *scope_make_overload_set(Arena *arena, Symbol *first, Symbol *second);
+bool    scope_overload_set_add(Symbol *set, Symbol *fn_sym, Arena *arena);
 
 // Symbol modification
 Symbol *symbol_set_value_int(Symbol *symbol, int value);

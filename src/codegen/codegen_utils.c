@@ -22,28 +22,82 @@ LLVMValueRef create_entry_block_alloca(CodegenContext *ctx, LLVMTypeRef ty, cons
     return alloca;
 }
 
-char* mangle_name(CodegenContext *ctx, CompilationUnit *unit, InternResult *symbol_name) {
-    if (!unit || !unit->logical_path) {
-        // Main module: no mangling
-        Slice *s = (Slice*)symbol_name->key;
+static void mangle_type_recursive(char *buf, size_t *pos, size_t cap, Type *t) {
+    if (!t) return;
+    if (*pos >= cap - 4) return;
+
+    switch (t->kind) {
+        case TYPE_VOID:      buf[(*pos)++] = 'v'; break;
+        case TYPE_PRIMITIVE: 
+            switch (t->as.primitive) {
+                case PRIM_I32:  buf[(*pos)++] = 'i'; break;
+                case PRIM_I64:  buf[(*pos)++] = 'I'; break;
+                case PRIM_F32:  buf[(*pos)++] = 'f'; break;
+                case PRIM_F64:  buf[(*pos)++] = 'F'; break;
+                case PRIM_BOOL: buf[(*pos)++] = 'b'; break;
+                case PRIM_CHAR: buf[(*pos)++] = 'c'; break;
+            }
+            break;
+        case TYPE_POINTER:
+            buf[(*pos)++] = 'P';
+            mangle_type_recursive(buf, pos, cap, t->as.ptr.base);
+            break;
+        case TYPE_ARRAY:
+            buf[(*pos)++] = 'A';
+            *pos += snprintf(buf + *pos, cap - *pos, "%lld", (long long)t->as.array.size);
+            mangle_type_recursive(buf, pos, cap, t->as.array.base);
+            break;
+        case TYPE_SLICE:
+            buf[(*pos)++] = 'S';
+            mangle_type_recursive(buf, pos, cap, t->as.slice.base);
+            break;
+        case TYPE_STRUCT:
+            buf[(*pos)++] = 'T';
+            if (t->as.struct_type.name) {
+                Slice *s = (Slice*)t->as.struct_type.name->key;
+                *pos += snprintf(buf + *pos, cap - *pos, "%zu%.*s", (size_t)s->len, (int)s->len, s->ptr);
+            } else {
+                *pos += snprintf(buf + *pos, cap - *pos, "anon");
+            }
+            break;
+        default: break;
+    }
+}
+
+char* mangle_name(CodegenContext *ctx, CompilationUnit *unit, InternResult *symbol_name, Type *fn_type) {
+    Slice *s = (Slice*)symbol_name->key;
+
+    // Special cases: 'main' and functions with no unit (intrinsics/special) are never mangled
+    if ((s->len == 4 && strncmp(s->ptr, "main", 4) == 0) || !unit || !unit->logical_path) {
         char *name = xmalloc(s->len + 1);
         memcpy(name, s->ptr, s->len);
         name[s->len] = '\0';
         return name;
     }
 
-    Slice *s = (Slice*)symbol_name->key;
-    // __mod_<logical_path>_<symbol_name>
-    size_t len = strlen(unit->logical_path) + s->len + 10;
-    char *mangled = xmalloc(len);
+    // Build the mangled name: __mod_<module_path>_<symbol_name>.<signature>
+    size_t cap = strlen(unit->logical_path) + s->len + 256;
+    char *mangled = xmalloc(cap);
 
     // Replace dots with underscores in logical path
     char *log_path_fixed = xstrdup(unit->logical_path);
     for (char *p = log_path_fixed; *p; p++) if (*p == '.') *p = '_';
 
-    snprintf(mangled, len, "__mod_%s_%.*s", log_path_fixed, (int)s->len, s->ptr);
+    size_t pos = snprintf(mangled, cap, "__mod_%s_%.*s", log_path_fixed, (int)s->len, s->ptr);
     free(log_path_fixed);
 
+    // Overload Suffix: .<type_signature>
+    if (fn_type && fn_type->kind == TYPE_FUNCTION) {
+        mangled[pos++] = '.';
+        for (size_t i = 0; i < fn_type->as.func.param_count; i++) {
+            mangle_type_recursive(mangled, &pos, cap, fn_type->as.func.params[i]);
+        }
+        if (fn_type->as.func.param_count == 0) {
+            mangled[pos++] = 'v'; // void/empty args
+        }
+    }
+
+    mangled[pos] = '\0';
     return mangled;
 }
 

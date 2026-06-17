@@ -12,6 +12,9 @@
 #include "sema_functions.inc"
 #include "sema_intrinsics.inc"
 #include "sema_casts.inc"
+#include "sema_overload_forbidden.inc"
+#include "sema_overload.inc"
+#include "sema_ops.inc"
 
 #undef SEMA_VALID
 #undef SEMA_ERROR

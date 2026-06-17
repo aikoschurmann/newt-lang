@@ -28,3 +28,21 @@ CODEGEN_EXIT("const_chain",
     "const A: i32 = B + 1;\n"
     "const B: i32 = 10;\n"
     "fn main() -> i32 { return A; }", 11)
+
+CODEGEN_EXIT("recursion_factorial",
+    "fn factorial(n: i32) -> i32 {\n"
+    "    if (n <= 1) { return 1; }\n"
+    "    return n * factorial(n - 1);\n"
+    "}\n"
+    "fn main() -> i32 {\n"
+    "    return factorial(5);\n"
+    "}", 120)
+
+CODEGEN_EXIT("recursion_fibonacci",
+    "fn fib(n: i32) -> i32 {\n"
+    "    if (n <= 1) { return n; }\n"
+    "    return fib(n - 1) + fib(n - 2);\n"
+    "}\n"
+    "fn main() -> i32 {\n"
+    "    return fib(7);\n"
+    "}", 13)

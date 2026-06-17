@@ -290,19 +290,19 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
 
 void register_intrinsics(TypeStore *ts, Scope *global_scope, DenseArenaInterner *ids) {
     // 1. print(...)
-    {
-        Slice s = { .ptr = "print", .len = 5 };
-        InternResult *res = intern(ids, &s, NULL);
-        Symbol *sym = scope_define_symbol(global_scope, res, ts->t_void, SYMBOL_VALUE_INTRINSIC, NULL, true, NULL);
-        if (sym) sym->intrinsic_kind = INTRINSIC_PRINT;
+    Slice print_slice = { .ptr = "print", .len = 5 };
+    InternResult *print_res = intern(ids, &print_slice, NULL);
+    Symbol *print_sym = scope_define_symbol(global_scope, print_res, ts->t_void, SYMBOL_VALUE_INTRINSIC, "<builtin>", true, NULL);
+    if (print_sym) {
+        print_sym->intrinsic_kind = INTRINSIC_PRINT;
     }
 
-    // 2. println(...) - maybe later, or just print_newline
-    {
-        Slice s = { .ptr = "println", .len = 7 };
-        InternResult *res = intern(ids, &s, NULL);
-        Symbol *sym = scope_define_symbol(global_scope, res, ts->t_void, SYMBOL_VALUE_INTRINSIC, NULL, true, NULL);
-        if (sym) sym->intrinsic_kind = INTRINSIC_PRINT_NEWLINE; // Overloading println to print then newline
+    // 2. println(...)
+    Slice println_slice = { .ptr = "println", .len = 7 };
+    InternResult *println_res = intern(ids, &println_slice, NULL);
+    Symbol *println_sym = scope_define_symbol(global_scope, println_res, ts->t_void, SYMBOL_VALUE_INTRINSIC, "<builtin>", true, NULL);
+    if (println_sym) {
+        println_sym->intrinsic_kind = INTRINSIC_PRINT_NEWLINE;
     }
 }
 

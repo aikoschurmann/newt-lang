@@ -41,3 +41,15 @@ CODEGEN_EXIT("nested_loops",
     "    }\n"
     "    return count;\n"
     "}", 9)
+
+CODEGEN_EXIT("nested_loop_break",
+    "fn main() -> i32 {\n"
+    "    count: i32 = 0;\n"
+    "    for (i: i32 = 0; i < 3; i = i + 1) {\n"
+    "        for (j: i32 = 0; j < 10; j = j + 1) {\n"
+    "            if (j == 2) { break; }\n"
+    "            count = count + 1;\n"
+    "        }\n"
+    "    }\n"
+    "    return count;\n"
+    "}", 6) // 3 * 2 = 6

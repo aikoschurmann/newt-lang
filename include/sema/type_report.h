@@ -41,7 +41,9 @@ typedef enum {
 
     TE_NOT_CONST,          
     TE_NOT_LVALUE,
-    TE_RECURSIVE_CONST          
+    TE_RECURSIVE_CONST,
+    TE_AMBIGUOUS_OVERLOAD,
+    TE_NO_MATCHING_OVERLOAD
 } TypeErrorKind;
 
 typedef struct {

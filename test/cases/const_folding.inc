@@ -1,4 +1,7 @@
 SEMA_VALID("const_arith", "const X: i32 = (1 + 2) * 3; fn main() { x: i32 = X; }")
 SEMA_VALID("const_bit", "const X: i32 = (1 << 5) | 1; fn main() { x: i32 = X; }")
+SEMA_VALID("const_comp", "const X: bool = 10 > 5; fn main() { x: bool = X; }")
+SEMA_VALID("const_float", "const X: f64 = 3.14 * 2.0; fn main() { x: f64 = X; }")
+SEMA_VALID("const_cast", "const X: i32 = 3.14 as i32; fn main() { x: i32 = X; }")
 SEMA_VALID("array_size_const", "const SZ: i32 = 10; fn main() { arr: i32[SZ]; }")
 SEMA_ERROR("array_size_non_const", "fn main() { x: i32 = 10; arr: i32[x]; }", TE_NOT_CONST)

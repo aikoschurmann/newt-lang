@@ -36,7 +36,7 @@ void codegen_decl_proto(CodegenContext *ctx, AstNode *decl) {
         char       *allocated_name = NULL;
         if (fdecl->intern_result && fdecl->intern_result->key) {
             CompilationUnit *u = module_loader_get_unit(ctx->loader, decl->filename);
-            allocated_name = mangle_name(ctx, u, fdecl->intern_result);
+            allocated_name = mangle_name(ctx, u, fdecl->intern_result, decl->type);
             name = allocated_name;
         }
 
@@ -70,7 +70,7 @@ void codegen_decl_proto(CodegenContext *ctx, AstNode *decl) {
         char       *allocated_name = NULL;
         if (vdecl->intern_result && vdecl->intern_result->key) {
             CompilationUnit *u = module_loader_get_unit(ctx->loader, decl->filename);
-            allocated_name = mangle_name(ctx, u, vdecl->intern_result);
+            allocated_name = mangle_name(ctx, u, vdecl->intern_result, NULL);
             name = allocated_name;
         }
 
@@ -95,7 +95,7 @@ void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
         char       *allocated_name = NULL;
         if (fdecl->intern_result && fdecl->intern_result->key) {
             CompilationUnit *u = module_loader_get_unit(ctx->loader, decl->filename);
-            allocated_name = mangle_name(ctx, u, fdecl->intern_result);
+            allocated_name = mangle_name(ctx, u, fdecl->intern_result, decl->type);
             name = allocated_name;
         }
 
@@ -224,7 +224,7 @@ void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
             char       *allocated_name = NULL;
             if (vdecl->intern_result && vdecl->intern_result->key) {
                 CompilationUnit *u = module_loader_get_unit(ctx->loader, decl->filename);
-                allocated_name = mangle_name(ctx, u, vdecl->intern_result);
+                allocated_name = mangle_name(ctx, u, vdecl->intern_result, NULL);
                 name = allocated_name;
             }
             LLVMValueRef gvar = LLVMGetNamedGlobal(ctx->module, name);

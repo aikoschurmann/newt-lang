@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 // =============================================================================
 // SECTION 1: CONSTANT FOLDING HELPERS
@@ -283,6 +284,13 @@ Type* check_identifier(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     return sym->type;
 }
 
+static Type* underlying_type(Type *t) {
+    while (t && t->kind == TYPE_POINTER) {
+        t = t->as.ptr.base;
+    }
+    return t;
+}
+
 /**
  * Validates a function call expression, checking arguments against parameters.
  */
@@ -292,11 +300,10 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     // =========================================================================
     // 1. INTRINSIC DISPATCH
     // =========================================================================
-    // Some "calls" are actually compiler intrinsics (like `len()`).
     if (call->callee->node_type == AST_IDENTIFIER) {
         Symbol *sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result, ctx->filename);
         if (sym && sym->kind == SYMBOL_VALUE_INTRINSIC) {
-            expr->type = ctx->store->t_void; // Placeholder
+            expr->type = ctx->store->t_void; 
             
             size_t arg_count = call->args ? call->args->count : 0;
             for (size_t i = 0; i < arg_count; i++) {
@@ -311,9 +318,143 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     }
 
     // =========================================================================
-    // 2. CALLEE RESOLUTION
+    // 2. CANDIDATE RESOLUTION
     // =========================================================================
-    Type *callee_type = check_expression(ctx, scope, call->callee, NULL);
+    Symbol *callee_sym = NULL;
+    Type   *callee_type = NULL;
+    bool    is_instance_method = false;
+
+    if (call->callee->node_type == AST_IDENTIFIER) {
+        callee_sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result, ctx->filename);
+    } else if (call->callee->node_type == AST_MEMBER_EXPR) {
+        AstMemberExpr *mem = &call->callee->data.member_expr;
+        Type *target_type = check_expression(ctx, scope, mem->target, NULL);
+        if (target_type) {
+            Type *underlying = underlying_type(target_type);
+
+            if (underlying->kind == TYPE_STRUCT) {
+                callee_sym = (Symbol*)hashmap_get(underlying->as.struct_type.methods, mem->member->key, ptr_hash, ptr_cmp);
+                
+                if (callee_sym) {
+                    // Instance method call detection:
+                    bool target_is_type = false;
+                    if (mem->target->node_type == AST_IDENTIFIER) {
+                        Symbol *s = mem->target->data.identifier.symbol;
+                        if (s && s->kind == SYMBOL_VALUE_TYPE) target_is_type = true;
+                    }
+                    is_instance_method = !target_is_type;
+                }
+            }
+        }
+    }
+
+    if (!callee_sym) {
+        // Fallback for non-overloadable expressions (like function pointers)
+        callee_type = check_expression(ctx, scope, call->callee, NULL);
+        if (call->callee->node_type == AST_IDENTIFIER) callee_sym = call->callee->data.identifier.symbol;
+        else if (call->callee->node_type == AST_MEMBER_EXPR) callee_sym = call->callee->data.member_expr.symbol;
+    }
+
+    size_t arg_count = call->args ? call->args->count : 0;
+
+    // OVERLOAD RESOLUTION LOOP
+    if (callee_sym && callee_sym->kind == SYMBOL_OVERLOAD_SET) {
+        size_t n_cands = callee_sym->overloads->count;
+
+        // Pass 1: Type-check args
+        Type **arg_types = alloca(sizeof(Type*) * (arg_count ? arg_count : 1));
+        for (size_t i = 0; i < arg_count; i++) {
+            AstNode *arg = *(AstNode**)dynarray_get(call->args, i);
+            arg_types[i] = check_expression(ctx, scope, arg, NULL);
+            if (!arg_types[i]) return NULL;
+        }
+
+        // Pass 2: Collect viable candidates
+        Symbol **viable = alloca(sizeof(Symbol*) * n_cands);
+        int **mk = alloca(sizeof(int*) * n_cands);
+        size_t n_viable = 0;
+
+        for (size_t oi = 0; oi < n_cands; oi++) {
+            Symbol *cand = *(Symbol**)dynarray_get(callee_sym->overloads, oi);
+            Type *ft = cand->type;
+            if (!ft || ft->kind != TYPE_FUNCTION) continue;
+            
+            size_t param_start = 0;
+            size_t effective_param_count = ft->as.func.param_count;
+            
+            if (is_instance_method && ft->as.func.param_count > 0) {
+                param_start = 1;
+                effective_param_count--;
+            }
+
+            if (effective_param_count != arg_count) continue;
+
+            int *kinds = alloca(sizeof(int) * (arg_count ? arg_count : 1));
+            bool ok = true;
+            for (size_t p = 0; p < arg_count; p++) {
+                Type *pt = ft->as.func.params[param_start + p];
+                if (!pt) { ok = false; break; }
+                if (arg_types[p] == pt) {
+                    kinds[p] = 2; // exact
+                } else if (type_can_implicit_cast(pt, arg_types[p])) {
+                    kinds[p] = 1; // cast
+                } else {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok) continue;
+
+            mk[n_viable] = kinds;
+            viable[n_viable] = cand;
+            n_viable++;
+        }
+
+        if (n_viable == 0) {
+            TypeError err = { .kind = TE_NO_MATCHING_OVERLOAD, .span = expr->span, .filename = ctx->filename };
+            err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
+            dynarray_push_value(ctx->errors, &err);
+            return NULL;
+        }
+
+        // Pass 3: Dominance Filter
+        bool *dominated = alloca(sizeof(bool) * n_viable);
+        memset(dominated, 0, sizeof(bool) * n_viable);
+
+        for (size_t a = 0; a < n_viable; a++) {
+            for (size_t b = 0; b < n_viable; b++) {
+                if (a == b || dominated[a]) continue;
+                bool b_dom_a = true, strictly = false;
+                for (size_t p = 0; p < arg_count; p++) {
+                    if (mk[b][p] < mk[a][p]) { b_dom_a = false; break; }
+                    if (mk[b][p] > mk[a][p])   strictly = true;
+                }
+                if (b_dom_a && strictly) dominated[a] = true;
+            }
+        }
+
+        Symbol *best = NULL;
+        size_t n_best = 0;
+        for (size_t i = 0; i < n_viable; i++) {
+            if (!dominated[i]) {
+                best = viable[i];
+                n_best++;
+            }
+        }
+
+        if (n_best > 1) {
+            TypeError err = { .kind = TE_AMBIGUOUS_OVERLOAD, .span = expr->span, .filename = ctx->filename };
+            err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
+            dynarray_push_value(ctx->errors, &err);
+            return NULL;
+        }
+
+        callee_sym = best;
+        callee_type = best->type;
+    } else if (callee_sym) {
+        callee_type = callee_sym->type;
+    }
+
     if (!callee_type) return NULL;
 
     if (callee_type->kind != TYPE_FUNCTION) {
@@ -322,24 +463,27 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         return NULL;
     }
 
+    // Bind specific symbol and type to callee node
+    if (call->callee->node_type == AST_IDENTIFIER) {
+        call->callee->data.identifier.symbol = callee_sym;
+        call->callee->type = callee_type;
+    } else if (call->callee->node_type == AST_MEMBER_EXPR) {
+        call->callee->data.member_expr.symbol = callee_sym;
+        call->callee->type = callee_type;
+    }
+
     // =========================================================================
     // 3. METHOD SELF INJECTION
     // =========================================================================
-    if (call->callee->node_type == AST_MEMBER_EXPR) {
+    if (is_instance_method && call->callee->node_type == AST_MEMBER_EXPR) {
         AstMemberExpr *mem = &call->callee->data.member_expr;
-        if (mem->is_instance_method && callee_type->as.func.param_count > 0) {
+        
+        // If not already injected, perform self-injection
+        if (!mem->self_injected && mem->target->type && callee_type->as.func.param_count > 0) {
             Type *first_param_type = callee_type->as.func.params[0];
             Type *target_type = mem->target->type;
 
-            // Check if first_param is compatible with target_type (or its pointer/base)
-            Type *underlying_target = target_type;
-            if (underlying_target->kind == TYPE_POINTER) underlying_target = underlying_target->as.ptr.base;
-            
-            Type *underlying_param = first_param_type;
-            if (underlying_param->kind == TYPE_POINTER) underlying_param = underlying_param->as.ptr.base;
-
-            if (underlying_target == underlying_param) {
-                // It's an instance method call! Inject 'self'.
+            if (first_param_type) {
                 AstNode *self_arg = mem->target;
 
                 // Auto-ref: target is S, param is *S
@@ -375,27 +519,29 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                     memmove(&data[1], &data[0], (call->args->count - 1) * sizeof(AstNode*));
                 }
                 data[0] = self_arg;
+                mem->is_instance_method = true;
+                mem->self_injected = true;
             }
         }
     }
 
     // =========================================================================
-    // 4. ARGUMENT VALIDATION
+    // 4. ARGUMENT VALIDATION & COERCION
     // =========================================================================
     size_t param_count = callee_type->as.func.param_count;
-    size_t arg_count = call->args ? call->args->count : 0;
+    size_t actual_arg_count = call->args ? call->args->count : 0;
 
-    if (arg_count != param_count) {
-        TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.arg_count = { .expected = param_count, .actual = arg_count } };
+    if (actual_arg_count != param_count) {
+        TypeError err = { .kind = TE_ARG_COUNT_MISMATCH, .span = expr->span, .filename = ctx->filename, .as.arg_count = { .expected = param_count, .actual = actual_arg_count } };
         dynarray_push_value(ctx->errors, &err);
         return NULL;
     }
 
-    for (size_t i = 0; i < arg_count; i++) {
+    for (size_t i = 0; i < actual_arg_count; i++) {
         AstNode *arg = *(AstNode**)dynarray_get(call->args, i);
         Type *param_type = callee_type->as.func.params[i];
         
-        // Recurse with top-down type hint from the parameter.
+        // Re-check expression with the specific parameter type hint to ensure correct promotion (e.g. literals)
         if (check_expression(ctx, scope, arg, param_type)) {
             coerce_or_error(ctx, arg, param_type);
         }
@@ -808,7 +954,7 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
 
     if (t->as.struct_type.field_count != 3) {
         TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator struct must have exactly 3 fields: ctx, alloc, free" };
+                          .as.name.name = "Allocator struct must have exactly 3 fields: ctx, _alloc, _free" };
         dynarray_push_value(ctx->errors, &err);
         return;
     }
@@ -843,7 +989,7 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
     
     if (!alloc_field->type || alloc_field->type->kind != TYPE_FUNCTION) {
         TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field 'alloc' must be a function" };
+                          .as.name.name = "Allocator field '_alloc' must be a function" };
         dynarray_push_value(ctx->errors, &err);
     } else {
         Type *fn_ty = alloc_field->type;
@@ -852,14 +998,14 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
             (fn_ty->as.func.params[1]->kind != TYPE_PRIMITIVE || fn_ty->as.func.params[1]->as.primitive != PRIM_I64) ||
             fn_ty->as.func.return_type->kind != TYPE_POINTER) {
             TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                              .as.name.name = "Allocator field 'alloc' must have signature: fn(ptr, i64) -> ptr" };
+                              .as.name.name = "Allocator field '_alloc' must have signature: fn(ptr, i64) -> ptr" };
             dynarray_push_value(ctx->errors, &err);
         }
     }
 
     if (!free_field->type || free_field->type->kind != TYPE_FUNCTION) {
         TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field 'free' must be a function" };
+                          .as.name.name = "Allocator field '_free' must be a function" };
         dynarray_push_value(ctx->errors, &err);
     } else {
         Type *fn_ty = free_field->type;
@@ -868,7 +1014,7 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
             fn_ty->as.func.params[1]->kind != TYPE_POINTER ||
             !type_is_void(fn_ty->as.func.return_type)) {
             TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                              .as.name.name = "Allocator field 'free' must have signature: fn(ptr, ptr) -> void" };
+                              .as.name.name = "Allocator field '_free' must have signature: fn(ptr, ptr) -> void" };
             dynarray_push_value(ctx->errors, &err);
         }
     }

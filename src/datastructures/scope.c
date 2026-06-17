@@ -1,4 +1,5 @@
 #include "datastructures/scope.h"
+#include "sema/type.h"
 #include "core/module_loader.h"
 #include <stdio.h>
 #include <string.h>
@@ -26,17 +27,116 @@ Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind)
     return scope;
 }
 
+Symbol *scope_make_overload_set(Arena *arena, Symbol *first, Symbol *second) {
+    Symbol *set = arena_calloc(arena, sizeof(Symbol));
+    set->name_rec = first->name_rec;
+    set->kind     = SYMBOL_OVERLOAD_SET;
+    set->is_pub   = first->is_pub || second->is_pub;
+    set->overloads = arena_alloc(arena, sizeof(DynArray));
+    dynarray_init_in_arena(set->overloads, arena, sizeof(Symbol*), 4);
+    
+    dynarray_push_value(set->overloads, &first);
+    dynarray_push_value(set->overloads, &second);
+    return set;
+}
+
+bool scope_overload_set_add(Symbol *set, Symbol *fn_sym, Arena *arena) {
+    if (!set || set->kind != SYMBOL_OVERLOAD_SET || !fn_sym) return false;
+
+    // Reject identical signatures (same param types).
+    for (size_t i = 0; i < set->overloads->count; i++) {
+        Symbol *existing = *(Symbol**)dynarray_get(set->overloads, i);
+        Type *et = existing->type;
+        Type *nt = fn_sym->type;
+        
+        // If types are not resolved yet (Pass 1), we compare decl_nodes to avoid duplicates of the exact same node
+        if (!et || !nt) {
+            if (existing->decl_node == fn_sym->decl_node) return false;
+            continue;
+        }
+
+        if (et->kind != TYPE_FUNCTION || nt->kind != TYPE_FUNCTION) continue;
+        if (et->as.func.param_count != nt->as.func.param_count) continue;
+        
+        bool same = true;
+        for (size_t p = 0; p < et->as.func.param_count; p++) {
+            if (et->as.func.params[p] != nt->as.func.params[p]) { 
+                same = false; 
+                break; 
+            }
+        }
+        if (same) return false; // duplicate signature
+    }
+    
+    dynarray_push_value(set->overloads, &fn_sym);
+    if (fn_sym->is_pub) set->is_pub = true;
+    return true;
+}
+
 Symbol *scope_define_symbol(Scope *scope, InternResult *rec, Type *type, SymbolValue kind, const char *filename, bool is_pub, AstNode *decl_node) {
     if (!scope || !rec) {
         return NULL;
     }
     
-    // Type is optional (e.g. during Pass 1 name registration)
-    // We used to restrict this to modules, but now allow it for all kinds.
+    Symbol *existing = scope_lookup_symbol_local(scope, rec);
+    if (existing) {
+        // Handle function overloading
+        if (kind == SYMBOL_VALUE_FUNCTION && (existing->kind == SYMBOL_VALUE_FUNCTION || existing->kind == SYMBOL_OVERLOAD_SET)) {
+            
+            // GUARDS: Forbid overloading main or @link functions
+            bool is_main = false;
+            Slice *name = (Slice*)rec->key;
+            if (name->len == 4 && strncmp(name->ptr, "main", 4) == 0) is_main = true;
 
-    // Check for existing symbol in current scope
-    if (scope_lookup_symbol_local(scope, rec)) {
-        return NULL; // Symbol already defined in this scope
+            bool is_link = false;
+            if (decl_node && decl_node->node_type == AST_FUNCTION_DECLARATION) {
+                if (decl_node->data.function_declaration.link_name) is_link = true;
+            }
+
+            // Also check existing symbol if it's a single function
+            if (existing->kind == SYMBOL_VALUE_FUNCTION && existing->decl_node && 
+                existing->decl_node->node_type == AST_FUNCTION_DECLARATION) {
+                if (existing->decl_node->data.function_declaration.link_name) is_link = true;
+            }
+
+            if (is_main || is_link) {
+                return NULL; 
+            }
+
+            Symbol *candidate = arena_calloc(scope->arena, sizeof(Symbol));
+            if (!candidate) return NULL;
+
+            candidate->name_rec  = rec;
+            candidate->type      = type;
+            candidate->kind      = SYMBOL_VALUE_FUNCTION;
+            candidate->filename  = filename;
+            candidate->is_pub    = is_pub;
+            candidate->decl_node = decl_node;
+            candidate->flags     = SYMBOL_FLAG_NONE;
+
+            if (existing->kind == SYMBOL_VALUE_FUNCTION) {
+                // First collision -> upgrade to set
+                Symbol *set = scope_make_overload_set(scope->arena, existing, candidate);
+                hashmap_put(scope->symbols, rec->key, set, ptr_hash, ptr_cmp);
+                
+                // Replace in symbols_list
+                for (size_t i = 0; i < scope->symbols_list.count; i++) {
+                    Symbol **slot = (Symbol**)dynarray_get(&scope->symbols_list, i);
+                    if (*slot == existing) { 
+                        *slot = set; 
+                        break; 
+                    }
+                }
+                return candidate;
+            } else {
+                // Already a set -> just append
+                if (!scope_overload_set_add(existing, candidate, scope->arena)) {
+                    return NULL; // duplicate signature
+                }
+                return candidate;
+            }
+        }
+        return NULL; // Symbol already defined in this scope and not an overloadable function
     }
 
     Symbol *symbol = arena_calloc(scope->arena, sizeof(Symbol));
@@ -156,7 +256,7 @@ void scope_check_unused_symbols(Scope *scope){
     for (size_t i = 0; i < scope->symbols_list.count; i++) {
         Symbol *symbol = *(Symbol**)dynarray_get(&scope->symbols_list, i);
         if (symbol && !(symbol->flags & SYMBOL_FLAG_USED)) {
-            printf("Warning: Unused symbol '%s'\n", symbol->name_rec->key ? (char*)symbol->name_rec->key : "(unknown)");
+            // printf("Warning: Unused symbol '%s'\n", symbol->name_rec->key ? (char*)symbol->name_rec->key : "(unknown)");
         }
     }
 }
@@ -168,8 +268,17 @@ void scope_print_symbols(Scope *scope, int indent) {
         Symbol *s = *(Symbol**)dynarray_get(&scope->symbols_list, i);
         if (!s) continue;
         const char *name = s->name_rec && s->name_rec->key ? (char*)s->name_rec->key : "(unknown)";
-        const char *type_name = s->type ? "(type present)" : "(none)";
-        printf("%*s- Symbol: '%s', type: %s, flags: 0x%02x\n", indent, "", name, type_name, (unsigned)s->flags);
+        
+        if (s->kind == SYMBOL_OVERLOAD_SET) {
+            printf("%*s- Symbol: '%s' (OVERLOAD SET, count: %zu)\n", indent, "", name, s->overloads->count);
+            for (size_t j = 0; j < s->overloads->count; j++) {
+                Symbol *cand = *(Symbol**)dynarray_get(s->overloads, j);
+                printf("%*s  [%zu] type: %s, flags: 0x%02x\n", indent, "", j, cand->type ? "(present)" : "(none)", (unsigned)cand->flags);
+            }
+        } else {
+            const char *type_name = s->type ? "(type present)" : "(none)";
+            printf("%*s- Symbol: '%s', type: %s, flags: 0x%02x\n", indent, "", name, type_name, (unsigned)s->flags);
+        }
     }
 }
 

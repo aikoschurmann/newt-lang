@@ -361,7 +361,7 @@ static void register_program_functions(TypeCheckContext *ctx, Scope *global_scop
         // Methods are registered later, in a separate pass
         if (func->target_type_node) continue;
 
-        if (func->intern_result && !scope_lookup_symbol_local(global_scope, func->intern_result)) {
+        if (func->intern_result) {
             define_symbol_or_error(ctx, global_scope, func->intern_result, NULL, SYMBOL_VALUE_FUNCTION, decl->span, func->is_pub, decl->filename, decl);
         }
     }
@@ -479,9 +479,28 @@ static void resolve_program_functions(TypeCheckContext *ctx, Scope *global_scope
         if (func->target_type_node) continue;
 
         resolve_function_decl(ctx, global_scope, decl);
-        Symbol *sym = scope_lookup_symbol_local(global_scope, func->intern_result);
-        if (sym) {
-            sym->type = decl->type;
+        
+        // Targeted Lookup: Find the specific Symbol associated with this AstNode
+        Symbol *top = scope_lookup_symbol_local(global_scope, func->intern_result);
+        Symbol *target = NULL;
+
+        if (top) {
+            if (top->kind == SYMBOL_OVERLOAD_SET) {
+                // Find the candidate whose decl_node matches this AST node.
+                for (size_t j = 0; j < top->overloads->count; j++) {
+                    Symbol *c = *(Symbol**)dynarray_get(top->overloads, j);
+                    if (c->decl_node == decl) { 
+                        target = c; 
+                        break; 
+                    }
+                }
+            } else {
+                target = top;
+            }
+        }
+
+        if (target) {
+            target->type = decl->type;
         }
     }
 }
@@ -521,7 +540,21 @@ static void resolve_program_methods(TypeCheckContext *ctx, Scope *global_scope) 
         sym->is_pub = func->is_pub;
         sym->filename = decl->filename;
 
-        hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, sym, ptr_hash, ptr_cmp);
+        Symbol *existing_method = (Symbol*)hashmap_get(target_type->as.struct_type.methods, func->intern_result->key, ptr_hash, ptr_cmp);
+        if (existing_method) {
+            if (existing_method->kind == SYMBOL_VALUE_FUNCTION) {
+                Symbol *set = scope_make_overload_set(ctx->store->arena, existing_method, sym);
+                hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, set, ptr_hash, ptr_cmp);
+            } else if (existing_method->kind == SYMBOL_OVERLOAD_SET) {
+                if (!scope_overload_set_add(existing_method, sym, ctx->store->arena)) {
+                    TypeError err = { .kind = TE_REDECLARATION, .span = decl->span, .filename = ctx->filename };
+                    err.as.name.name = ((Slice*)func->intern_result->key)->ptr;
+                    dynarray_push_value(ctx->errors, &err);
+                }
+            }
+        } else {
+            hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, sym, ptr_hash, ptr_cmp);
+        }
     }
 }
 
