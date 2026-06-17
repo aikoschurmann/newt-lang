@@ -273,27 +273,25 @@ fn main() -> i32 {
     a: Allocator = arena.get_allocator();
 
     f: Formula = build_sudoku(a);
-
     assignment: i8[] = @alloc(i8, std.heap.allocator, f.var_count as i64);
     for (i: i64 = 0; i < f.var_count as i64; i += 1) { assignment[i] = VAL_UNASSIGNED; }
 
+    total_sum: i32 = 0;
     if f.solve(assignment) {
-        print("SOLVED\n");
         for (r: i32 = 0; r < 9; r += 1) {
             for (c: i32 = 0; c < 9; c += 1) {
                 for (v: i32 = 0; v < 9; v += 1) {
-                    if get_lit_val(assignment, sv(r, c, v)) == VAL_TRUE {
-                        print((v + 1) as i64);
+                    if (get_lit_val(assignment, sv(r, c, v)) == VAL_TRUE) {
+                        val: i32 = v + 1;
+                        total_sum = total_sum + (val * val);
                     }
                 }
-                if c < 8 { print(" "); }
             }
-            print("\n");
         }
-    } else {
-        print("UNSAT\n");
     }
 
+    print(total_sum);
+
     @free(std.heap.allocator, assignment);
-    return 0;
+    return total_sum;
 }
