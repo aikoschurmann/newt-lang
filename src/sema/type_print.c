@@ -26,67 +26,48 @@
 #define COL_PTR            MAGENTA
 #define COL_NUM            YELLOW
 
-// =============================================================================
-// INTERNAL TYPE SERIALIZATION
-// =============================================================================
-
-/**
- * Recursively prints a Type object to the given file stream.
- * Used internally for both error reporting and type dumping.
- */
-static void type_print_internal(FILE *out, const Type *type) {
-    if (!type) {
-        fprintf(out, "null");
-        return;
+static void print_primitive_kind(FILE *out, PrimitiveKind kind) {
+    switch (kind) {
+        case PRIM_I8:   fprintf(out, "i8"); break;
+        case PRIM_I16:  fprintf(out, "i16"); break;
+        case PRIM_I32:  fprintf(out, "i32"); break;
+        case PRIM_I64:  fprintf(out, "i64"); break;
+        case PRIM_U8:   fprintf(out, "u8"); break;
+        case PRIM_U16:  fprintf(out, "u16"); break;
+        case PRIM_U32:  fprintf(out, "u32"); break;
+        case PRIM_U64:  fprintf(out, "u64"); break;
+        case PRIM_F32:  fprintf(out, "f32"); break;
+        case PRIM_F64:  fprintf(out, "f64"); break;
+        case PRIM_BOOL: fprintf(out, "bool"); break;
+        case PRIM_CHAR: fprintf(out, "char"); break;
     }
+}
+
+static void type_print_internal(FILE *out, const Type *type) {
+    if (!type) { fprintf(out, "null"); return; }
 
     switch (type->kind) {
-        case TYPE_VOID: 
-            fprintf(out, "void"); 
-            break;
-            
-        case TYPE_PRIMITIVE: {
-            switch (type->as.primitive) {
-                case PRIM_I8:   fprintf(out, "i8"); break;
-                case PRIM_I16:  fprintf(out, "i16"); break;
-                case PRIM_I32:  fprintf(out, "i32"); break;
-                case PRIM_I64:  fprintf(out, "i64"); break;
-                case PRIM_U8:   fprintf(out, "u8"); break;
-                case PRIM_U16:  fprintf(out, "u16"); break;
-                case PRIM_U32:  fprintf(out, "u32"); break;
-                case PRIM_U64:  fprintf(out, "u64"); break;
-                case PRIM_F32:  fprintf(out, "f32"); break;
-                case PRIM_F64:  fprintf(out, "f64"); break;
-                case PRIM_BOOL: fprintf(out, "bool"); break;
-                case PRIM_CHAR: fprintf(out, "char"); break;
-            }
-            break;
-        }
-        case TYPE_POINTER: {
+        case TYPE_VOID: fprintf(out, "void"); break;
+        case TYPE_PRIMITIVE: print_primitive_kind(out, type->as.primitive); break;
+        case TYPE_POINTER:
             fprintf(out, "*");
             type_print_internal(out, type->as.ptr.base);
             break;
-        }
-        case TYPE_ARRAY: {
+        case TYPE_ARRAY:
             type_print_internal(out, type->as.array.base);
             fprintf(out, "[%lld]", (long long)type->as.array.size);
             break;
-        }
-        case TYPE_SLICE: {
+        case TYPE_SLICE:
             type_print_internal(out, type->as.slice.base);
             fprintf(out, "[]");
             break;
-        }
-        case TYPE_STRUCT: {
+        case TYPE_STRUCT:
             if (type->as.struct_type.name && type->as.struct_type.name->key) {
                 Slice *s = (Slice*)type->as.struct_type.name->key;
                 fprintf(out, "%.*s", (int)s->len, s->ptr);
-            } else {
-                fprintf(out, "struct");
-            }
+            } else fprintf(out, "struct");
             break;
-        }
-        case TYPE_FUNCTION: {
+        case TYPE_FUNCTION:
             fprintf(out, "fn(");
             for (size_t i = 0; i < type->as.func.param_count; i++) {
                 if (i > 0) fprintf(out, ", ");
@@ -95,11 +76,7 @@ static void type_print_internal(FILE *out, const Type *type) {
             fprintf(out, ") -> ");
             type_print_internal(out, type->as.func.return_type);
             break;
-        }
-        case TYPE_ENUM: {
-             fprintf(out, "enum");
-             break;
-        }
+        default: break;
     }
 }
 
