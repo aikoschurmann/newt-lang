@@ -141,10 +141,10 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
 
     char *abs_path = get_absolute_path_real(loader->arena, path);
     if (!abs_path) {
-        // Fallback for module.tn if path might be a directory
+        // Fallback for module.nt if path might be a directory
         StrBuf fallback_sb;
         strbuf_init(&fallback_sb, loader->arena);
-        strbuf_append_fmt(&fallback_sb, "%s/module.tn", path);
+        strbuf_append_fmt(&fallback_sb, "%s/module.nt", path);
         abs_path = get_absolute_path_real(loader->arena, fallback_sb.buf);
         
         if (!abs_path) {
@@ -305,15 +305,15 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
                 strcpy(target_logical, cl_sb.buf);
             }
 
-            // Try .tn then /module.tn
+            // Try .nt then /module.nt
             StrBuf target_file_sb;
             strbuf_init(&target_file_sb, loader->arena);
-            strbuf_append_fmt(&target_file_sb, "%s.tn", mod_path_full_sb.buf);
+            strbuf_append_fmt(&target_file_sb, "%s.nt", mod_path_full_sb.buf);
             
             if (!file_exists(target_file_sb.buf)) {
                  target_file_sb.len = 0;
                  target_file_sb.buf[0] = '\0';
-                 strbuf_append_fmt(&target_file_sb, "%s/module.tn", mod_path_full_sb.buf);
+                 strbuf_append_fmt(&target_file_sb, "%s/module.nt", mod_path_full_sb.buf);
             }
             
             int res = load_module_recursive(loader, target_file_sb.buf, target_logical, abs_path, depth + 1);

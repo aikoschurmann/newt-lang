@@ -48,7 +48,7 @@ static int run_single_fixture(const char *dir_path, const char *name) {
     ModuleLoader *loader = module_loader_create(arena, &opts, keywords, identifiers, strings);
     
     char main_path[512];
-    snprintf(main_path, sizeof(main_path), "%s/main.tn", dir_path);
+    snprintf(main_path, sizeof(main_path), "%s/main.nt", dir_path);
     
     int load_res = load_module_recursive(loader, main_path, NULL, NULL, 0);
     if (load_res != 0) {

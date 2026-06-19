@@ -70,13 +70,13 @@ TestCompileResult test_compile_source(const char *src) {
                     }
 
                     char target_file[1024];
-                    snprintf(target_file, sizeof(target_file), "%s/%s.tn", opts.stdlib_path, cp_buf);
+                    snprintf(target_file, sizeof(target_file), "%s/%s.nt", opts.stdlib_path, cp_buf);
                     
                     FILE *f = fopen(target_file, "r");
                     if (f) {
                         fclose(f);
                     } else {
-                        snprintf(target_file, sizeof(target_file), "%s/%s/module.tn", opts.stdlib_path, cp_buf);
+                        snprintf(target_file, sizeof(target_file), "%s/%s/module.nt", opts.stdlib_path, cp_buf);
                     }
                     
                     char *target_logical = arena_alloc(loader->arena, strlen(cl_buf) + 1);

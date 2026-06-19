@@ -154,10 +154,10 @@ clean:
 # Change this at the bottom of your Makefile
 
 run: release
-	$(Q)./$(OUT_DIR)/$(NAME) ./input/main.tn --run
+	$(Q)./$(OUT_DIR)/$(NAME) ./input/main.nt --run
 
 run-dev: dev
-	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/main.tn --run
+	$(Q)./$(OUT_DIR)/$(NAME_DEV) ./input/main.nt --run
 
 test: $(OUT_DIR)/test_runner
 	$(Q)./$(OUT_DIR)/test_runner

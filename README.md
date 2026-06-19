@@ -1,8 +1,82 @@
-# The Language
+# The Newt Programming Language
 
-A statically-typed, procedural language with a focus on explicit memory control and zero hidden allocations. Syntax borrows from Rust and C while keeping things simple: every variable is declared with a type, every allocation is visible, and there is no garbage collector.
+Welcome to **Newt**! Newt is a statically-typed, procedural programming language designed for systems programming where predictability, speed, and safety are key. 
 
-Source files use the `.tn` extension.
+Newt is built from the ground up for developers who want absolute control over memory without the overhead of a garbage collector, and without the runtime hidden allocations found in many modern languages. This is just a passion project I work on in my spare time, so please be patient as the language is still in its early stages of development.
+
+## Why Newt?
+
+- **Zero Hidden Allocations**: What you write is what gets executed. Every single heap allocation is explicit in your code.
+- **Modern Predictability**: Combines a clean, Rust-inspired syntax layout with the low-overhead procedural design of C.
+- **Deterministic Resource Management**: Utilize scoped `defer` statements to guarantee cleanups occur immediately upon exiting scope blocks.
+- **Modular Design**: A simple import and namespace resolution mechanism allows for clean project layout and code reuse.
+
+---
+
+## Language Tour by Example
+
+Here is a complete, compile-ready example that demonstrates structs, methods, explicit arena allocation, control flow, type casting, and standard library interaction.
+
+```rust
+import std;
+import std.math;
+
+// Conveniently alias standard memory types
+alias Allocator = std.mem.Allocator;
+alias Arena = std.arena.Arena;
+
+// Define a public Particle structure
+pub struct Particle {
+    x: f32;
+    y: f32;
+    vx: f32;
+    vy: f32;
+}
+
+// Implement instance methods using standard static naming conventions
+pub fn Particle.update(self: *Particle, dt: f32) -> void {
+    self.x += self.vx * dt;
+    self.y += self.vy * dt;
+}
+
+fn main() -> i32 {
+    // 1. Initialize a lightweight memory Arena (1024 bytes capacity)
+    arena: Arena = Arena.new(1024);
+    defer { arena.destroy(); } // Bulk-reclaims all allocated memory when main exits
+
+    a: Allocator = arena.get_allocator();
+
+    // 2. Allocate contiguous memory for 3 Particle structures on the arena
+    count: i64 = 3;
+    particles: *Particle = @alloc(Particle, a, count);
+    if particles == null {
+        print("Memory allocation failed!\n");
+        return 1;
+    }
+
+    // 3. Initialize particle state
+    for (i: i32 = 0; i < count as i32; i += 1) {
+        p: *Particle = &particles[i]; // Pointer index lookup
+        p.x = (i as f32) * 10.0;
+        p.y = 0.0;
+        p.vx = 1.5;
+        p.vy = 2.5;
+    }
+
+    // 4. Update coordinates and calculate distance from origin
+    dt: f32 = 0.5;
+    for (i: i32 = 0; i < count as i32; i += 1) {
+        p: *Particle = &particles[i];
+        p.update(dt);
+        
+        // Calculate Euclidean distance utilizing standard math utilities
+        dist: f32 = std.math.sqrt(p.x * p.x + p.y * p.y);
+        print("Particle ", i, " -> Position: (", p.x, ", ", p.y, "), Distance: ", dist, "\n");
+    }
+
+    return 0;
+}
+```
 
 ---
 
@@ -10,425 +84,21 @@ Source files use the `.tn` extension.
 
 ### Prerequisites
 
-- Clang
-- LLVM
-- Make
+You will need the following tools configured in your environment:
+- **Clang** & **LLVM**
+- **Make**
 
-### Build the compiler
+### Building the Compiler
 
+Build both development and release versions of the Newt compiler:
 ```bash
-make          # builds both release and dev binaries
-make test     # runs the test suite
+make          # Creates the compiler binary in `./out/compiler`
+make test     # Runs the test verification suite
 ```
 
-### Compile and run a program
+### Compiling and Running a Program
 
+To compile and immediately execute a Newt source file (`.nt`):
 ```bash
-./out/compiler path/to/program.tn --run
+./out/compiler path/to/program.nt --run
 ```
-
----
-
-## Language Tour
-
-### Variables and Constants
-
-Variables are declared with `name: Type = value`. Type annotations are always required.
-
-```rust
-x: i32 = 10;
-pi: f64 = 3.14159;
-name: *char = "hello";
-flag: bool = true;
-```
-
-Constants are evaluated at compile time and can be used anywhere a literal is valid.
-
-```rust
-const MAX: i32 = 100;
-const HALF_MAX: i32 = MAX / 2;  // constant folding
-```
-
----
-
-### Primitive Types
-
-| Type    | Description                    |
-|---------|--------------------------------|
-| `i32`   | 32-bit signed integer          |
-| `i64`   | 64-bit signed integer          |
-| `f32`   | 32-bit floating-point          |
-| `f64`   | 64-bit floating-point          |
-| `bool`  | Boolean (`true` / `false`)     |
-| `char`  | Single byte character          |
-| `*T`    | Pointer to type `T`            |
-| `*void` | Untyped pointer                |
-| `void`  | No value (function return only)|
-
----
-
-### Functions
-
-```rust
-fn add(a: i32, b: i32) -> i32 {
-    return a + b;
-}
-
-fn greet(name: *char) -> void {
-    print("Hello, ");
-    println(name);
-}
-```
-
-Functions can be passed as values using function pointer types:
-
-```rust
-fn apply(a: i32, b: i32, op: fn(i32, i32) -> i32) -> i32 {
-    return op(a, b);
-}
-
-fn main() -> i32 {
-    result: i32 = apply(10, 20, add);
-    return result;  // 30
-}
-```
-
----
-
-### Control Flow
-
-**If / else**
-
-```rust
-if x > 0 {
-    println("positive");
-} else if x < 0 {
-    println("negative");
-} else {
-    println("zero");
-}
-```
-
-**While**
-
-```rust
-i: i32 = 0;
-while (i < 10) {
-    i = i + 1;
-}
-```
-
-**For**
-
-```rust
-for (i: i32 = 0; i < 10; i += 1) {
-    println(i);
-}
-```
-
-**Break and continue**
-
-```rust
-while true {
-    if done { break; }
-    if skip { continue; }
-}
-```
-
----
-
-### Structs and Methods
-
-Structs group fields together. Methods are regular functions with the struct type as a name prefix; `self` is an explicit pointer parameter.
-
-```rust
-struct Point {
-    x: f64;
-    y: f64;
-}
-
-fn Point.scale(self: *Point, factor: f64) -> void {
-    self.x = self.x * factor;
-    self.y = self.y * factor;
-}
-
-fn main() -> i32 {
-    p: Point = Point { x: 1.0, y: 2.0 };
-    p.scale(3.0);
-    // p.x == 3.0, p.y == 6.0
-    return 0;
-}
-```
-
-Struct fields initialise in any order, and structs can be nested:
-
-```rust
-struct Color { r: i32; g: i32; b: i32; }
-struct Pixel { pos: Point; color: Color; }
-
-px: Pixel = Pixel {
-    pos: Point { x: 10.0, y: 20.0 },
-    color: Color { r: 255, g: 0, b: 128 }
-};
-```
-
----
-
-### Pointers
-
-Take the address of a variable with `&` and dereference with `*`.
-
-```rust
-x: i32 = 42;
-p: *i32 = &x;
-*p = 100;       // x is now 100
-```
-
-Pointer-to-pointer:
-
-```rust
-pp: **i32 = &p;
-val: i32 = **pp;  // 100
-```
-
-Null pointers use the `null` keyword or an explicit zero cast:
-
-```rust
-p: *Node = null;
-if p == null { ... }
-```
-
-Pointer arithmetic is done through integer casts:
-
-```rust
-next: *i32 = ((p as i64) + 4) as *i32;
-```
-
-Auto-deref through a pointer works on struct member access — `p.field` is shorthand for `(*p).field`.
-
----
-
-### Arrays
-
-Fixed-size arrays:
-
-```rust
-nums: i32[5] = {1, 2, 3, 4, 5};
-matrix: f64[3][3];  // multidimensional
-```
-
-The size can be inferred from the initialiser:
-
-```rust
-primes: i32[] = {2, 3, 5, 7, 11};  // becomes i32[5]
-```
-
-Arrays decay to pointers when taken by address:
-
-```rust
-p: *i32 = &nums[0];
-```
-
----
-
-### Casts
-
-Use `as` to cast between numeric types, pointers, and mixed combinations. Casts are explicit — there are no silent narrowing conversions.
-
-```rust
-big: i64 = 0xFFFFFFFF0000000A;
-small: i32 = big as i32;   // truncate
-
-ratio: f64 = 7.9;
-n: i32 = ratio as i32;     // truncate to 7
-
-c: char = 'A';
-code: i32 = c as i32;      // 65
-
-raw: *void = &x as *void;  // pointer reinterpret
-```
-
----
-
-### Aliases
-
-`alias` binds a new name to any existing symbol — a variable, function, struct, or type. The alias and the original refer to the same thing.
-
-```rust
-alias Vec2 = Point;                 // type alias
-alias origin = default_point;      // variable alias
-alias sum = add;                    // function alias
-
-s: Vec2 = Vec2 { x: 0.0, y: 0.0 };
-result: i32 = sum(1, 2);
-```
-
----
-
-### Defer
-
-`defer` schedules a statement or block to run when the current scope exits, including on early returns. Deferred actions run in last-in, first-out order.
-
-```rust
-fn read_file() -> i32 {
-    f: *File = open("data.txt");
-    defer { close(f); }       // always runs, even on early return
-
-    if f == null { return -1; }
-    // ... work with f ...
-    return 0;
-}
-```
-
-Defer inside loops fires on each iteration:
-
-```rust
-for (i: i32 = 0; i < 3; i += 1) {
-    defer { cleanup(i); }  // runs at the end of each loop body
-    do_work(i);
-}
-```
-
----
-
-### Modules and Imports
-
-Code is split into modules. A module is a `.tn` file; its public declarations (marked `pub`) are visible to importers.
-
-**Import the whole standard library:**
-
-```rust
-import std;
-
-fn main() -> i32 {
-    a: std.arena.Arena = std.arena.Arena.new(std.heap.allocator, 4096);
-    defer { a.destroy(); }
-    return 0;
-}
-```
-
-**Import a specific sub-module:**
-
-```rust
-import std.mem;
-
-alloc: std.mem.Allocator = std.heap.allocator;
-```
-
-**Import from a relative path:**
-
-```rust
-// project/utils.tn
-pub fn clamp(x: i32, lo: i32, hi: i32) -> i32 { ... }
-
-// project/main.tn
-import .utils { clamp };
-
-fn main() -> i32 {
-    return clamp(150, 0, 100);  // 100
-}
-```
-
-**Re-export:** mark an import `pub` to expose it to downstream modules.
-
-```rust
-pub import .mem;
-pub import .heap;
-```
-
----
-
-### Memory Management
-
-There is no implicit allocation. All heap memory goes through an `Allocator` value, which you pass explicitly. The standard library ships two ready-to-use allocators.
-
-**Heap allocator** — wraps `malloc`/`free`:
-
-```rust
-import std;
-
-fn main() -> i32 {
-    p: *i32 = @alloc(i32, std.heap.allocator, 1);
-    *p = 42;
-    @free(std.heap.allocator, p);
-    return 0;
-}
-```
-
-**Arena allocator** — bump-pointer, freed all at once:
-
-```rust
-import std;
-alias Arena = std.arena.Arena;
-
-fn main() -> i32 {
-    arena: Arena = Arena.new(std.heap.allocator, 4096);
-    defer { arena.destroy(); }
-
-    a: std.mem.Allocator = arena.get_allocator();
-
-    node: *Node = @alloc(Node, a, 1);
-    node.val = 99;
-    // everything freed when arena.destroy() runs
-    return 0;
-}
-```
-
-**Allocating arrays:** pass a count as the third argument to `@alloc`.
-
-```rust
-buf: *i32 = @alloc(i32, std.heap.allocator, 64);
-buf[0] = 1;
-buf[63] = 2;
-@free(std.heap.allocator, buf);
-```
-
-**Custom allocators** implement `std.mem.Allocator`:
-
-```rust
-import std.mem;
-
-pub struct Allocator {
-    ctx: *void;
-    _alloc: fn(*void, i64) -> *void;
-    _free:  fn(*void, *void) -> void;
-}
-```
-
-Any struct with `ctx`, `_alloc`, and `_free` fields works as a drop-in allocator.
-
----
-
-### FFI — Calling C Functions
-
-Declare an external C function with `@link` and the symbol name. No body is needed.
-
-```rust
-@link("malloc")
-fn malloc(size: i64) -> *void;
-
-@link("free")
-fn free(ptr: *void) -> void;
-
-@link("printf")
-fn printf(fmt: *char) -> i32;
-```
-
-The standard library's `std.libc` module provides ready-made bindings for the most common C functions.
-
----
-
-## Standard Library
-
-| Module            | Contents                                              |
-|-------------------|-------------------------------------------------------|
-| `std.heap`        | `allocator` — global heap allocator (malloc/free)     |
-| `std.mem`         | `Allocator` struct and interface                      |
-| `std.arena`       | `Arena` — bump-pointer allocator with bulk free       |
-| `std.fixed_arena` | `FixedArena` — arena over a caller-supplied buffer    |
-| `std.string`      | `Str` — non-owning string view with slice/compare ops |
-| `std.math`        | `abs`, `min`, `max`, `clamp` for i32/i64/f64          |
-| `std.io`          | `print` / `println`                                   |
-| `std.libc`        | Bindings for malloc, free, printf, memcpy, strlen … |
-
-Import `std` to get everything, or import individual sub-modules to keep dependencies explicit.
