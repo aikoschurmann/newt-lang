@@ -1,95 +1,88 @@
 import std;
+import std.vec;
 
 alias Allocator = std.mem.Allocator;
-alias Arena = std.arena.Arena;
+alias Arena     = std.arena.Arena;
+alias Vec       = std.vec.Vec;
 
-struct Clause {
-    lits: i32[];
-}
-
-struct Formula {
-    clauses: Clause[];
-    var_count: u32;
-}
-
+const NUM_VARS: i32 = 729;
 const VAL_UNASSIGNED: i8 = 0;
 const VAL_TRUE: i8       = 1;
 const VAL_FALSE: i8      = 2;
 
-// --- Clause Helpers & Methods ---
-
-fn make_clause1(a: Allocator, l1: i32) -> Clause {
-    c: Clause;
-    c.lits = @alloc(i32, a, 1);
-    c.lits[0] = l1;
-    return c;
+struct Clause  { lits: i32[]; }
+struct Formula {
+    clauses: Vec<Clause>;
+    assignment: i8[729];
+    trail: Vec<i32>;
+    var_to_clauses: Vec<Vec<i32>>;
 }
 
-fn make_clause2(a: Allocator, l1: i32, l2: i32) -> Clause {
-    c: Clause;
-    c.lits = @alloc(i32, a, 2);
-    c.lits[0] = l1; c.lits[1] = l2;
-    return c;
-}
+fn sv(r: i32, c: i32, v: i32) -> i32 { return (r * 81) + (c * 9) + v + 1; }
 
-fn get_lit_val(assignment: i8[], lit: i32) -> i8 {
-    var_idx: i32 = lit;
-    is_negated: bool = false;
-    if lit < 0 {
-        var_idx = -lit;
-        is_negated = true;
-    }
-    
-    val: i8 = assignment[var_idx as i64 - 1];
-    if val == VAL_UNASSIGNED { return VAL_UNASSIGNED; }
-    
-    if is_negated {
+fn lit_val(assignment: *i8, lit: i32) -> i8 {
+    if lit > 0 {
+        return assignment[lit as i64 - 1];
+    } else {
+        val: i8 = assignment[-lit as i64 - 1];
+        if val == VAL_UNASSIGNED { return VAL_UNASSIGNED; }
         if val == VAL_TRUE { return VAL_FALSE; }
         return VAL_TRUE;
     }
-    return val;
 }
 
 impl Formula {
-    // Propagates deterministic choices. Returns false if a conflict is found.
-    fn propagate(self: *Formula, assignment: i8[]) -> bool {
-        changed: bool = true;
-        while changed {
-            changed = false;
+    fn assign(self: *Formula, var_idx: i32, val: i8) {
+        self.assignment[var_idx as i64 - 1] = val;
+        self.trail.push(var_idx);
+    }
+
+    fn add_clause(self: *Formula, a: Allocator, lits: i32[]) {
+        idx: i32 = self.clauses.len as i32;
+        self.clauses.push(Clause { lits: a.clone(lits) });
+        for (i: i64 = 0; i < lits.len; i += 1) {
+            lit: i32 = lits[i];
+            var_idx: i32 = lit;
+            if var_idx < 0 { var_idx = -var_idx; }
+            v: Vec<i32> = self.var_to_clauses.get(var_idx as i64 - 1);
+            v.push(idx);
+            self.var_to_clauses.set(var_idx as i64 - 1, v);
+        }
+    }
+
+    fn propagate(self: *Formula, start_trail: i64) -> bool {
+        head: i64 = start_trail;
+        
+        while (head < self.trail.len) {
+            var_idx: i32 = self.trail.get(head);
+            head += 1;
             
-            for (i: i64 = 0; i < self.clauses.len; i += 1) {
-                c: Clause = self.clauses[i];
-                unassigned_count: i32 = 0;
-                last_unassigned_lit: i32 = 0;
-                is_satisfied: bool = false;
+            affected: Vec<i32> = self.var_to_clauses.get(var_idx as i64 - 1);
+            
+            for (i: i64 = 0; i < affected.len; i += 1) {
+                c_idx: i32 = affected.get(i);
+                c: Clause = self.clauses.get(c_idx as i64);
+                
+                unassigned: i32 = 0;
+                last_lit: i32 = 0;
+                satisfied: bool = false;
 
                 for (j: i64 = 0; j < c.lits.len; j += 1) {
-                    val: i8 = get_lit_val(assignment, c.lits[j]);
-                    if val == VAL_TRUE {
-                        is_satisfied = true;
-                        break;
-                    }
-                    if val == VAL_UNASSIGNED {
-                        unassigned_count += 1;
-                        last_unassigned_lit = c.lits[j];
-                    }
+                    v: i8 = lit_val(&self.assignment[0], c.lits[j]);
+                    if v == VAL_TRUE  { satisfied = true; break; }
+                    if v == VAL_UNASSIGNED { unassigned += 1; last_lit = c.lits[j]; }
                 }
 
-                if !is_satisfied {
-                    if unassigned_count == 0 {
-                        return false; // CONFLICT: All literals are false
-                    }
-                    if unassigned_count == 1 {
-                        // UNIT CLAUSE: We must force this literal to be true
-                        var_idx: i32 = last_unassigned_lit;
-                        if var_idx < 0 { var_idx = -var_idx; }
-                        
-                        if last_unassigned_lit < 0 {
-                            assignment[var_idx as i64 - 1] = VAL_FALSE;
-                        } else {
-                            assignment[var_idx as i64 - 1] = VAL_TRUE;
+                if !satisfied {
+                    if unassigned == 0 { return false; }
+                    if unassigned == 1 {
+                        v_idx: i32 = last_lit;
+                        val: i8 = VAL_TRUE;
+                        if v_idx < 0 { 
+                            v_idx = -v_idx; 
+                            val = VAL_FALSE;
                         }
-                        changed = true;
+                        self.assign(v_idx, val);
                     }
                 }
             }
@@ -97,205 +90,172 @@ impl Formula {
         return true;
     }
 
-    fn solve(self: *Formula, assignment: i8[]) -> bool {
-        // 1. Unit Propagation
-        if !self.propagate(assignment) {
-            return false; // Hit a wall, backtrack immediately
-        }
-        
-        // 2. Check if done (or find next unassigned)
-        pick_idx: i64 = -1;
-        for (i: i64 = 0; i < self.var_count as i64; i += 1) {
-            if assignment[i] == VAL_UNASSIGNED {
-                pick_idx = i;
-                break;
+    fn solve(self: *Formula, pick_start: i32) -> i32 {
+        trail_start: i64 = self.trail.len;
+
+        if !self.propagate(trail_start) {
+            for (i: i64 = trail_start; i < self.trail.len; i += 1) {
+                var_idx: i32 = self.trail.get(i);
+                self.assignment[var_idx as i64 - 1] = VAL_UNASSIGNED;
             }
+            self.trail.len = trail_start;
+            return -1;
+        }
+
+        pick: i32 = -1;
+        for (i: i32 = pick_start; i < 729; i += 1) {
+            if self.assignment[i as i64] == VAL_UNASSIGNED { pick = i; break; }
+        }
+
+        if pick == -1 {
+            total: i32 = 0;
+            for (r: i32 = 0; r < 9; r += 1) {
+                for (c: i32 = 0; c < 9; c += 1) {
+                    for (v: i32 = 0; v < 9; v += 1) {
+                        if (lit_val(&self.assignment[0], sv(r, c, v)) == VAL_TRUE) {
+                            digit: i32 = v + 1;
+                            total = total + (digit * digit);
+                        }
+                    }
+                }
+            }
+            return total;
+        }
+
+        self.assign(pick + 1, VAL_TRUE);
+        res1: i32 = self.solve(pick + 1);
+        if res1 >= 0 { return res1; }
+
+        for (i: i64 = trail_start; i < self.trail.len; i += 1) {
+            var_idx: i32 = self.trail.get(i);
+            self.assignment[var_idx as i64 - 1] = VAL_UNASSIGNED;
+        }
+        self.trail.len = trail_start;
+
+        self.assign(pick + 1, VAL_FALSE);
+        res2: i32 = self.solve(pick + 1);
+        
+        if res2 < 0 {
+            for (i: i64 = trail_start; i < self.trail.len; i += 1) {
+                var_idx: i32 = self.trail.get(i);
+                self.assignment[var_idx as i64 - 1] = VAL_UNASSIGNED;
+            }
+            self.trail.len = trail_start;
         }
         
-        // If no unassigned variables remain, we won!
-        if pick_idx == -1 { return true; }
-
-        // 3. Guess TRUE
-        assignment[pick_idx] = VAL_TRUE;
-        
-        snapshot1: i8[] = @alloc(i8, std.heap.allocator, self.var_count as i64);
-        for (k: i64 = 0; k < self.var_count as i64; k += 1) { snapshot1[k] = assignment[k]; }
-        
-        if self.solve(snapshot1) { 
-            for (k: i64 = 0; k < self.var_count as i64; k += 1) { assignment[k] = snapshot1[k]; }
-            @free(std.heap.allocator, snapshot1);
-            return true; 
-        }
-        @free(std.heap.allocator, snapshot1);
-        
-        // 4. Guess FALSE
-        assignment[pick_idx] = VAL_FALSE;
-        snapshot2: i8[] = @alloc(i8, std.heap.allocator, self.var_count as i64);
-        for (k: i64 = 0; k < self.var_count as i64; k += 1) { snapshot2[k] = assignment[k]; }
-
-        if self.solve(snapshot2) { 
-            for (k: i64 = 0; k < self.var_count as i64; k += 1) { assignment[k] = snapshot2[k]; }
-            @free(std.heap.allocator, snapshot2);
-            return true; 
-        }
-        @free(std.heap.allocator, snapshot2);
-
-        // 5. Backtrack
-        assignment[pick_idx] = VAL_UNASSIGNED;
-        return false;
+        return res2;
     }
-}
-
-// --- Sudoku to SAT Compiler ---
-
-struct FormulaBuilder {
-    clauses: Clause[];
-    count: i64;
-    a: Allocator;
-}
-
-impl FormulaBuilder {
-    fn add(self: *FormulaBuilder, c: Clause) {
-        self.clauses[self.count] = c;
-        self.count += 1;
-    }
-}
-
-// Maps Row, Col, Value (0-8) to a SAT variable (1 to 729)
-fn sv(r: i32, c: i32, v: i32) -> i32 {
-    return (r * 81) + (c * 9) + v + 1;
 }
 
 fn build_sudoku(a: Allocator) -> Formula {
-    fb: FormulaBuilder;
-    fb.a = a;
-    fb.clauses = @alloc(Clause, a, 12000);
-    fb.count = 0;
+    f: Formula;
+    alloc_ref: Allocator = a;
+    f.clauses.with_capacity(&alloc_ref, 12000);
+    f.trail.with_capacity(&alloc_ref, 12000);
+    f.var_to_clauses.with_capacity(&alloc_ref, 729);
 
-    // 1. Each cell must have at least one value
+    for (i: i64 = 0; i < 729; i += 1) { 
+        f.assignment[i] = VAL_UNASSIGNED; 
+        v: Vec<i32>;
+        v.with_capacity(&alloc_ref, 32);
+        f.var_to_clauses.push(v);
+    }
+
     for (r: i32 = 0; r < 9; r += 1) {
         for (c: i32 = 0; c < 9; c += 1) {
-            cl: Clause;
-            cl.lits = @alloc(i32, a, 9);
-            for (v: i32 = 0; v < 9; v += 1) { cl.lits[v as i64] = sv(r, c, v); }
-            fb.add(cl);
+            f.add_clause(a, { 
+                sv(r,c,0), sv(r,c,1), sv(r,c,2), 
+                sv(r,c,3), sv(r,c,4), sv(r,c,5), 
+                sv(r,c,6), sv(r,c,7), sv(r,c,8) 
+            });
         }
     }
 
-    // 2. Each cell has at MOST one value
     for (r: i32 = 0; r < 9; r += 1) {
         for (c: i32 = 0; c < 9; c += 1) {
             for (v1: i32 = 0; v1 < 9; v1 += 1) {
                 for (v2: i32 = v1 + 1; v2 < 9; v2 += 1) {
-                    fb.add(make_clause2(a, -sv(r,c,v1), -sv(r,c,v2)));
+                    f.add_clause(a, { -sv(r,c,v1), -sv(r,c,v2) });
                 }
             }
         }
     }
 
-    // 3. Row Uniqueness
     for (r: i32 = 0; r < 9; r += 1) {
         for (v: i32 = 0; v < 9; v += 1) {
             for (c1: i32 = 0; c1 < 9; c1 += 1) {
                 for (c2: i32 = c1 + 1; c2 < 9; c2 += 1) {
-                    fb.add(make_clause2(a, -sv(r,c1,v), -sv(r,c2,v)));
+                    f.add_clause(a, { -sv(r,c1,v), -sv(r,c2,v) });
                 }
             }
         }
     }
 
-    // 4. Column Uniqueness
     for (c: i32 = 0; c < 9; c += 1) {
         for (v: i32 = 0; v < 9; v += 1) {
             for (r1: i32 = 0; r1 < 9; r1 += 1) {
                 for (r2: i32 = r1 + 1; r2 < 9; r2 += 1) {
-                    fb.add(make_clause2(a, -sv(r1,c,v), -sv(r2,c,v)));
+                    f.add_clause(a, { -sv(r1,c,v), -sv(r2,c,v) });
                 }
             }
         }
     }
 
-    // 5. Box Uniqueness
     for (br: i32 = 0; br < 3; br += 1) {
         for (bc: i32 = 0; bc < 3; bc += 1) {
             for (v: i32 = 0; v < 9; v += 1) {
                 for (i1: i32 = 0; i1 < 9; i1 += 1) {
                     for (i2: i32 = i1 + 1; i2 < 9; i2 += 1) {
-                        r1: i32 = (br * 3) + (i1 / 3);
-                        c1: i32 = (bc * 3) + (i1 % 3);
-                        r2: i32 = (br * 3) + (i2 / 3);
-                        c2: i32 = (bc * 3) + (i2 % 3);
-                        fb.add(make_clause2(a, -sv(r1,c1,v), -sv(r2,c2,v)));
+                        r1: i32 = (br * 3) + (i1 / 3); c1: i32 = (bc * 3) + (i1 % 3);
+                        r2: i32 = (br * 3) + (i2 / 3); c2: i32 = (bc * 3) + (i2 % 3);
+                        f.add_clause(a, { -sv(r1,c1,v), -sv(r2,c2,v) });
                     }
                 }
             }
         }
     }
 
-    // Clues
-    fb.add(make_clause1(a, sv(0, 0, 4))); 
-    fb.add(make_clause1(a, sv(0, 1, 2))); 
-    fb.add(make_clause1(a, sv(0, 4, 6))); 
-    fb.add(make_clause1(a, sv(1, 0, 5))); 
-    fb.add(make_clause1(a, sv(1, 3, 0))); 
-    fb.add(make_clause1(a, sv(1, 4, 8))); 
-    fb.add(make_clause1(a, sv(1, 5, 4))); 
-    fb.add(make_clause1(a, sv(2, 1, 8))); 
-    fb.add(make_clause1(a, sv(2, 2, 7))); 
-    fb.add(make_clause1(a, sv(2, 7, 5))); 
-    fb.add(make_clause1(a, sv(3, 0, 7))); 
-    fb.add(make_clause1(a, sv(3, 4, 5))); 
-    fb.add(make_clause1(a, sv(3, 8, 2))); 
-    fb.add(make_clause1(a, sv(4, 0, 3))); 
-    fb.add(make_clause1(a, sv(4, 3, 7))); 
-    fb.add(make_clause1(a, sv(4, 5, 2))); 
-    fb.add(make_clause1(a, sv(4, 8, 0))); 
-    fb.add(make_clause1(a, sv(5, 0, 6))); 
-    fb.add(make_clause1(a, sv(5, 4, 1))); 
-    fb.add(make_clause1(a, sv(5, 8, 5))); 
-    fb.add(make_clause1(a, sv(6, 1, 5))); 
-    fb.add(make_clause1(a, sv(6, 6, 1))); 
-    fb.add(make_clause1(a, sv(6, 7, 7))); 
-    fb.add(make_clause1(a, sv(7, 3, 3))); 
-    fb.add(make_clause1(a, sv(7, 4, 0))); 
-    fb.add(make_clause1(a, sv(7, 5, 8))); 
-    fb.add(make_clause1(a, sv(7, 8, 4))); 
-    fb.add(make_clause1(a, sv(8, 4, 7))); 
-    fb.add(make_clause1(a, sv(8, 7, 6))); 
-    fb.add(make_clause1(a, sv(8, 8, 8))); 
+    grid: *char = "42..6....5..084....87....5.7...5...23..7.2..06...1...5.5....17....308..4....7..68";
+    for (i: i32 = 0; i < 81; i += 1) {
+        ch: i8 = grid[i as i64] as i8;
+        if ch != 46 { 
+            val: i32 = (ch - 48) as i32; 
+            f.add_clause(a, { sv(i / 9, i % 9, val) });
+        }
+    }
 
-    f: Formula;
-    f.var_count = 729;
-    f.clauses = @alloc(Clause, a, fb.count);
-    for(i: i64 = 0; i < fb.count; i+=1) { f.clauses[i] = fb.clauses[i]; }
     return f;
 }
 
 fn main() -> i32 {
-    arena: Arena = Arena.new(10485760); 
+    arena: Arena = Arena.new(20485760);
     defer { arena.destroy(); }
-    a: Allocator = arena.get_allocator();
 
-    f: Formula = build_sudoku(a);
-    assignment: i8[] = @alloc(i8, std.heap.allocator, f.var_count as i64);
-    for (i: i64 = 0; i < f.var_count as i64; i += 1) { assignment[i] = VAL_UNASSIGNED; }
-
-    total_sum: i32 = 0;
-    if f.solve(assignment) {
-        for (r: i32 = 0; r < 9; r += 1) {
-            for (c: i32 = 0; c < 9; c += 1) {
-                for (v: i32 = 0; v < 9; v += 1) {
-                    if (get_lit_val(assignment, sv(r, c, v)) == VAL_TRUE) {
-                        val: i32 = v + 1;
-                        total_sum = total_sum + (val * val);
-                    }
-                }
+    f: Formula = build_sudoku(arena.get_allocator());
+    
+    // Initial propagation pass
+    for (i: i64 = 0; i < f.clauses.len; i += 1) {
+        c: Clause = f.clauses.get(i);
+        if c.lits.len == 1 {
+            var_idx: i32 = c.lits[0];
+            val: i8 = VAL_TRUE;
+            if var_idx < 0 { 
+                var_idx = -var_idx; 
+                val = VAL_FALSE;
+            }
+            if f.assignment[var_idx as i64 - 1] == VAL_UNASSIGNED {
+                f.assign(var_idx, val);
+            } else if f.assignment[var_idx as i64 - 1] != val {
+                return -1; // Conflict in unary clauses
             }
         }
     }
 
-    print(total_sum);
+    if !f.propagate(0) {
+        return -1;
+    }
 
-    @free(std.heap.allocator, assignment);
-    return total_sum;
+    result: i32 = f.solve(0);
+    print(result);
+    return result;
 }
