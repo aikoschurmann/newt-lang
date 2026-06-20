@@ -16,60 +16,62 @@ fn arena_alloc_impl(ctx: *void, size: i64) -> *void {
 fn arena_free_impl(ctx: *void, ptr: *void) -> void {
 }
 
-// Create an Arena with a specific backing allocator.
-pub fn Arena.new(backing: std.mem.Allocator, size: i64) -> Arena {
-    buf: *char = backing.alloc(size) as *char;
-    return Arena {
-        buffer: buf,
-        capacity: size,
-        offset: 0,
-        backing_allocator: backing
-    };
-}
-
-// Create an Arena using the default heap allocator.
-pub fn Arena.new(size: i64) -> Arena {
-    return Arena.new(std.heap.allocator, size);
-}
-
-pub fn Arena.alloc(self: *Arena, size: i64) -> *void {
-    // Check for Out-Of-Memory
-    if (self.offset + size) > self.capacity {
-        return null; 
+impl Arena {
+    // Create an Arena with a specific backing allocator.
+    pub fn new(backing: std.mem.Allocator, size: i64) -> Arena {
+        buf: *char = backing.alloc(size) as *char;
+        return Arena {
+            buffer: buf,
+            capacity: size,
+            offset: 0,
+            backing_allocator: backing
+        };
     }
-    
-    // Bump the pointer
-    ptr: *void = ((self.buffer as i64) + self.offset) as *void;
-    self.offset = self.offset + size;
-    return ptr;
-}
 
-// Overloaded alloc for count * size
-pub fn Arena.alloc(self: *Arena, count: i64, size: i64) -> *void {
-    return self.alloc(count * size);
-}
+    // Create an Arena using the default heap allocator.
+    pub fn new(size: i64) -> Arena {
+        return Arena.new(std.heap.allocator, size);
+    }
 
-// Arena frees are no-ops: memory is reclaimed in bulk by .reset() or .destroy().
-pub fn Arena.free(self: *Arena, ptr: *void) -> void {
-}
+    pub fn alloc(self: *Arena, size: i64) -> *void {
+        // Check for Out-Of-Memory
+        if (self.offset + size) > self.capacity {
+            return null; 
+        }
+        
+        // Bump the pointer
+        ptr: *void = ((self.buffer as i64) + self.offset) as *void;
+        self.offset = self.offset + size;
+        return ptr;
+    }
 
-// Returns how many bytes are still available.
-pub fn Arena.remaining(self: *Arena) -> i64 {
-    return self.capacity - self.offset;
-}
+    // Overloaded alloc for count * size
+    pub fn alloc(self: *Arena, count: i64, size: i64) -> *void {
+        return self.alloc(count * size);
+    }
 
-pub fn Arena.reset(self: *Arena) -> void {
-    self.offset = 0;
-}
+    // Arena frees are no-ops: memory is reclaimed in bulk by .reset() or .destroy().
+    pub fn free(self: *Arena, ptr: *void) -> void {
+    }
 
-pub fn Arena.get_allocator(self: *Arena) -> std.mem.Allocator {
-    return std.mem.Allocator {
-        ctx: self as *void,
-        _alloc: arena_alloc_impl,
-        _free: arena_free_impl
-    };
-}
+    // Returns how many bytes are still available.
+    pub fn remaining(self: *Arena) -> i64 {
+        return self.capacity - self.offset;
+    }
 
-pub fn Arena.destroy(self: *Arena) -> void {
-    self.backing_allocator.free(self.buffer as *void);
+    pub fn reset(self: *Arena) -> void {
+        self.offset = 0;
+    }
+
+    pub fn get_allocator(self: *Arena) -> std.mem.Allocator {
+        return std.mem.Allocator {
+            ctx: self as *void,
+            _alloc: arena_alloc_impl,
+            _free: arena_free_impl
+        };
+    }
+
+    pub fn destroy(self: *Arena) -> void {
+        self.backing_allocator.free(self.buffer as *void);
+    }
 }

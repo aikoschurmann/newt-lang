@@ -219,6 +219,11 @@ int load_module_recursive(ModuleLoader *loader, const char *path, const char *lo
     unit->global_scope = NULL; 
     unit->signatures_resolved = false;
     unit->imports_resolved = false;
+    unit->generic_templates = hashmap_create(loader->arena, 16);
+    unit->mono_instances = arena_alloc(loader->arena, sizeof(DynArray));
+    if (unit->mono_instances) {
+        dynarray_init_in_arena(unit->mono_instances, loader->arena, sizeof(AstNode*), 8);
+    }
     
     hashmap_put(loader->units, abs_path, unit, str_hash, str_cmp);
     if (logical_path) {

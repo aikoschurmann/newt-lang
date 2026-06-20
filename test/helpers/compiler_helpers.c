@@ -42,6 +42,11 @@ TestCompileResult test_compile_source(const char *src) {
     unit->global_scope = NULL;
     unit->signatures_resolved = false;
     unit->imports_resolved = false;
+    unit->generic_templates = hashmap_create(res.arena, 16);
+    unit->mono_instances = arena_alloc(res.arena, sizeof(DynArray));
+    if (unit->mono_instances) {
+        dynarray_init_in_arena(unit->mono_instances, res.arena, sizeof(AstNode*), 8);
+    }
     
     hashmap_put(loader->units, unit->absolute_path, unit, str_hash, str_cmp);
     dynarray_push_value(loader->units_ordered, &unit);
@@ -166,7 +171,7 @@ int test_run_and_get_exit_code(const char *src) {
         if (res.sema_ctx.errors) {
             for (size_t i = 0; i < res.sema_ctx.errors->count; i++) {
                 TypeError *err = (TypeError*)dynarray_get(res.sema_ctx.errors, i);
-                fprintf(stderr, "      Sema Error %zu: Kind %d\n", i + 1, err->kind);
+                fprintf(stderr, "      Sema Error %zu: Kind %d at span %u:%u to %u:%u in %s\n", i + 1, err->kind, err->span.start_line, err->span.start_col, err->span.end_line, err->span.end_col, err->filename);
             }
         }
         test_cleanup_compilation(&res);

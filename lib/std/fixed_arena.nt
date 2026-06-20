@@ -15,35 +15,37 @@ fn fixed_arena_alloc_impl(ctx: *void, size: i64) -> *void {
 
 fn fixed_arena_free_impl(_ctx: *void, _ptr: *void) -> void {}
 
-pub fn FixedArena.new(buffer: *char, capacity: i64) -> FixedArena {
-    return FixedArena {
-        buffer: buffer,
-        capacity: capacity,
-        offset: 0
-    };
-}
-
-pub fn FixedArena.alloc(self: *FixedArena, size: i64) -> *void {
-    if (self.offset + size) > self.capacity {
-        return null;
+impl FixedArena {
+    pub fn new(buffer: *char, capacity: i64) -> FixedArena {
+        return FixedArena {
+            buffer: buffer,
+            capacity: capacity,
+            offset: 0
+        };
     }
-    ptr: *void = ((self.buffer as i64) + self.offset) as *void;
-    self.offset = self.offset + size;
-    return ptr;
-}
 
-pub fn FixedArena.remaining(self: *FixedArena) -> i64 {
-    return self.capacity - self.offset;
-}
+    pub fn alloc(self: *FixedArena, size: i64) -> *void {
+        if (self.offset + size) > self.capacity {
+            return null;
+        }
+        ptr: *void = ((self.buffer as i64) + self.offset) as *void;
+        self.offset = self.offset + size;
+        return ptr;
+    }
 
-pub fn FixedArena.reset(self: *FixedArena) -> void {
-    self.offset = 0;
-}
+    pub fn remaining(self: *FixedArena) -> i64 {
+        return self.capacity - self.offset;
+    }
 
-pub fn FixedArena.get_allocator(self: *FixedArena) -> std.mem.Allocator {
-    return std.mem.Allocator {
-        ctx: self as *void,
-        _alloc: fixed_arena_alloc_impl,
-        _free: fixed_arena_free_impl
-    };
+    pub fn reset(self: *FixedArena) -> void {
+        self.offset = 0;
+    }
+
+    pub fn get_allocator(self: *FixedArena) -> std.mem.Allocator {
+        return std.mem.Allocator {
+            ctx: self as *void,
+            _alloc: fixed_arena_alloc_impl,
+            _free: fixed_arena_free_impl
+        };
+    }
 }

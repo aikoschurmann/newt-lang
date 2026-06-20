@@ -13,6 +13,8 @@ typedef struct CompilationUnit {
     Scope *global_scope;
     bool signatures_resolved;
     bool imports_resolved;
+    HashMap *generic_templates; // InternResult* -> AstNode* (template decl)
+    DynArray *mono_instances;   // DynArray<AstNode*> (monomorphized function/struct decls)
 } CompilationUnit;
 
 typedef struct {

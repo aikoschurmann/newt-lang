@@ -1,0 +1,116 @@
+import .mem;
+
+pub struct MapEntry<K, V> {
+    key: K;
+    value: V;
+    occupied: bool;
+}
+
+pub struct HashMap<K, V> {
+    entries: *MapEntry<K, V>;
+    size: i64;
+    capacity: i64;
+    allocator: *mem.Allocator;
+    hash_fn: fn(K) -> i64;
+    eq_fn: fn(K, K) -> bool;
+}
+
+impl<K, V> HashMap<K, V> {
+    pub fn init(self: *HashMap<K, V>, allocator: *mem.Allocator, hash_fn: fn(K) -> i64, eq_fn: fn(K, K) -> bool) -> void {
+        self.entries = null as *MapEntry<K, V>;
+        self.size = 0;
+        self.capacity = 0;
+        self.allocator = allocator;
+        self.hash_fn = hash_fn;
+        self.eq_fn = eq_fn;
+    }
+
+    pub fn free(self: *HashMap<K, V>) -> void {
+        if (self.capacity > 0) {
+            @free(self.allocator, self.entries);
+            self.entries = null as *MapEntry<K, V>;
+            self.capacity = 0;
+            self.size = 0;
+        }
+    }
+
+    pub fn put(self: *HashMap<K, V>, key: K, value: V) -> bool {
+        if (self.size * 2 >= self.capacity) {
+            new_cap: i64 = self.capacity * 2;
+            if (new_cap == 0) {
+                new_cap = 16;
+            }
+            self.resize(new_cap);
+        }
+
+        h: i64 = self.hash_fn(key) % self.capacity;
+        if (h < 0) { h = h + self.capacity; }
+        
+        i: i64 = 0;
+        while (i < self.capacity) {
+            idx: i64 = (h + i) % self.capacity;
+            if (!self.entries[idx].occupied) {
+                self.entries[idx].key = key;
+                self.entries[idx].value = value;
+                self.entries[idx].occupied = true;
+                self.size = self.size + 1;
+                return true;
+            }
+            if (self.eq_fn(self.entries[idx].key, key)) {
+                self.entries[idx].value = value; // Update existing
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    pub fn get(self: *HashMap<K, V>, key: K, out_value: *V) -> bool {
+        if (self.capacity == 0) {
+            return false;
+        }
+        h: i64 = self.hash_fn(key) % self.capacity;
+        if (h < 0) { h = h + self.capacity; }
+        
+        i: i64 = 0;
+        while (i < self.capacity) {
+            idx: i64 = (h + i) % self.capacity;
+            if (!self.entries[idx].occupied) {
+                return false;
+            }
+            if (self.eq_fn(self.entries[idx].key, key)) {
+                *out_value = self.entries[idx].value;
+                return true;
+            }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    pub fn resize(self: *HashMap<K, V>, new_cap: i64) -> void {
+        old_entries: *MapEntry<K, V> = self.entries;
+        old_cap: i64 = self.capacity;
+
+        self.capacity = new_cap;
+        self.size = 0;
+        self.entries = @alloc(MapEntry<K, V>, self.allocator, new_cap);
+        
+        i: i64 = 0;
+        while (i < new_cap) {
+            self.entries[i].occupied = false;
+            i = i + 1;
+        }
+
+        i = 0;
+        while (i < old_cap) {
+            if (old_entries[i].occupied) {
+                self.put(old_entries[i].key, old_entries[i].value);
+            }
+            i = i + 1;
+        }
+
+        if (old_cap > 0) {
+            @free(self.allocator, old_entries);
+        }
+    }
+}

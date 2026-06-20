@@ -29,7 +29,7 @@
 
 <Program> ::= { <TopLevelDecl> }
 
-<TopLevelDecl> ::= [ <Attribute> ] [ PUB ] ( <FunctionDecl> | <StructDecl> | <VariableDeclStmt> | <ImportDecl> | <AliasDecl> )
+<TopLevelDecl> ::= [ <Attribute> ] [ PUB ] ( <FunctionDecl> | <StructDecl> | <ImplDecl> | <VariableDeclStmt> | <ImportDecl> | <AliasDecl> )
 
 <Attribute> ::= AT IDENTIFIER LPAREN STRING_LIT RPAREN
 
@@ -37,11 +37,15 @@
 <ImportSymbols> ::= <ImportSymbol> { COMMA <ImportSymbol> }
 <ImportSymbol> ::= IDENTIFIER [ ALIAS IDENTIFIER ]
 
-<AliasDecl> ::= ALIAS IDENTIFIER ASSIGN <Postfix> SEMICOLON
+<AliasDecl> ::= ALIAS IDENTIFIER ASSIGN <Type> SEMICOLON
 
-<StructDecl> ::= STRUCT IDENTIFIER L_BRACE { IDENTIFIER COLON <Type> SEMICOLON } R_BRACE
+<StructDecl> ::= STRUCT IDENTIFIER [ LT <TypeParams> GT ] L_BRACE { IDENTIFIER COLON <Type> SEMICOLON } R_BRACE
 
-<FunctionDecl> ::= FN IDENTIFIER LPAREN [ <ParamList> ] RPAREN [ ARROW <Type> ] <Block>
+<ImplDecl> ::= IMPL [ LT <TypeParams> GT ] <Type> L_BRACE { <FunctionDecl> } R_BRACE
+
+<FunctionDecl> ::= FN IDENTIFIER [ LT <TypeParams> GT ] LPAREN [ <ParamList> ] RPAREN [ ARROW <Type> ] <Block>
+
+<TypeParams> ::= IDENTIFIER { COMMA IDENTIFIER }
 
 <ParamList> ::= <Param> { COMMA <Param> }
 <Param>     ::= [ CONST ] IDENTIFIER COLON <Type>
@@ -97,7 +101,7 @@
 <PostfixOp> ::= PLUSPLUS | MINUSMINUS
                | L_SQB <Expression> R_SQB
                | LPAREN [ <ArgList> ] RPAREN 
-               | DOT IDENTIFIER
+               | DOT IDENTIFIER [ LT <TypeArgs> GT ]
                | <StructLitBody>
 
 <StructLitBody> ::= L_BRACE [ <FieldInits> ] R_BRACE
@@ -122,7 +126,8 @@
 
 <BaseType>    ::= I32 | I64 | BOOL | F32 | F64 | STRING | CHAR | VOID
 
-<Path>        ::= IDENTIFIER { DOT IDENTIFIER }
+<Path>        ::= IDENTIFIER { DOT IDENTIFIER } [ LT <TypeArgs> GT ]
+<TypeArgs>    ::= <Type> { COMMA <Type> }
 
 <FunctionType>  ::= FN LPAREN [ <TypeList> ] RPAREN [ ARROW <Type>]
 

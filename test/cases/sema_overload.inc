@@ -10,9 +10,9 @@ SEMA_VALID("overload_ptr_void", "fn f(p: *void) -> i32 { return 1; } fn f(p: *i3
 
 SEMA_VALID("overload_array_slice_match", "fn f(s: i32[]) -> i32 { return 1; } fn f(i: i32) -> i32 { return 2; } fn main() { a: i32[3] = {1,2,3}; f(a); }")
 
-SEMA_VALID("method_overload", "struct S { x: i32; } fn S.foo(self: *S) -> i32 { return 1; } fn S.foo(self: *S, a: i64) -> i32 { return 2; } fn main() { s: S; s.foo(); s.foo(10); }")
+SEMA_VALID("method_overload", "struct S { x: i32; } impl S { fn foo(self: *S) -> i32 { return 1; } fn foo(self: *S, a: i64) -> i32 { return 2; } } fn main() { s: S; s.foo(); s.foo(10); }")
 
-SEMA_VALID("method_overload_static", "struct S { x: i32; } fn S.bar() -> i32 { return 1; } fn S.bar(a: i64) -> i32 { return 2; } fn main() { S.bar(); S.bar(10); }")
+SEMA_VALID("method_overload_static", "struct S { x: i32; } impl S { fn bar() -> i32 { return 1; } fn bar(a: i64) -> i32 { return 2; } } fn main() { S.bar(); S.bar(10); }")
 
 // --- DOMINATION ---
 
@@ -28,7 +28,7 @@ SEMA_ERROR("ambiguity_cross_cast", "fn f(a: i32, b: i64) -> i32 { return 1; } fn
 
 SEMA_ERROR("ambiguity_identical_scores", "fn f(a: i64) -> i32 { return 1; } fn f(a: f64) -> i32 { return 2; } fn main() { x: i32 = f(10 as i32); }", TE_AMBIGUOUS_OVERLOAD)
 
-SEMA_ERROR("ambiguity_auto_ref", "struct S { x: i32; } fn S.foo(self: S) {} fn S.foo(self: *S) {} fn main() { s: S; s.foo(); }", TE_AMBIGUOUS_OVERLOAD)
+SEMA_ERROR("ambiguity_auto_ref", "struct S { x: i32; } impl S { fn foo(self: S) {} fn foo(self: *S) {} } fn main() { s: S; s.foo(); }", TE_AMBIGUOUS_OVERLOAD)
 
 SEMA_ERROR("ambiguity_return_type", "fn f() -> i32 { return 1; } fn f() -> f64 { return 1.0; } fn main() { x: i32 = f(); }", TE_AMBIGUOUS_OVERLOAD)
 

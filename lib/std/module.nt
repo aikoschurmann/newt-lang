@@ -5,3 +5,6 @@ pub import .arena;
 pub import .fixed_arena;
 pub import .math;
 pub import .string;
+pub import .vec;
+pub import .list;
+pub import .map;

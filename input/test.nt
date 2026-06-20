@@ -1,0 +1,1 @@
+fn id<T>(x: T) -> T { return x; } fn main() { a: f64 = id<i32>(42); }

@@ -13,7 +13,7 @@ PARSE_VALID("cast_precedence", "fn main() { x: i32 = 10; p: *i32 = &x; addr: i64
 PARSE_VALID("generic_fn_decl", "fn id<T>(x: T) -> T { return x; }")
 PARSE_VALID("generic_struct_decl", "struct Map<K, V> { keys: K[]; values: V[]; }")
 PARSE_VALID("generic_type_app", "fn main() { v: Vec<i32>; m: Map<String, i32>; }")
-PARSE_VALID("generic_method_decl", "fn Vec.push<T>(self: *Vec<T>, val: T) {}")
+PARSE_VALID("generic_method_decl", "impl<T> Vec<T> { fn push(self: *Vec<T>, val: T) {} }")
 PARSE_VALID("generic_nested", "fn main() { v: Vec<Vec<i32>>; }")
 PARSE_VALID("generic_deeply_nested", "fn main() { m: Map<String, Vec<Map<i32, bool>>>; }")
 PARSE_VALID("generic_with_pointers", "struct Graph<T> { nodes: *Vec<*T>; }")

@@ -406,12 +406,13 @@ int main(int argc, char **argv) {
     double t_sema_start = now_seconds();
     exit_code = compiler_run_sema(&state);
     double t_sema = now_seconds() - t_sema_start;
-    if (exit_code != EXIT_OK) {
-        goto cleanup;
-    }
 
     /* AST & Type system structure dumps */
     compiler_dump_info(&state);
+
+    if (exit_code != EXIT_OK) {
+        goto cleanup;
+    }
 
     /* Codegen and link steps */
     double t_cg_start = now_seconds();

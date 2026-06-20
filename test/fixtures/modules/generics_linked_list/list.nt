@@ -1,0 +1,28 @@
+pub struct Node<T> {
+    value: T;
+    next: *Node<T>;
+}
+
+pub struct List<T> {
+    head: *Node<T>;
+}
+
+impl<T> List<T> {
+    pub fn init(self: *List<T>) {
+        self.head = null;
+    }
+
+    pub fn push_front(self: *List<T>, node: *Node<T>) {
+        node.next = self.head;
+        self.head = node;
+    }
+
+    pub fn sum(self: *List<T>) -> T {
+        sum: T = 0;
+        curr: *Node<T> = self.head;
+        for (; curr != null; curr = curr.next) {
+            sum = sum + curr.value;
+        }
+        return sum;
+    }
+}

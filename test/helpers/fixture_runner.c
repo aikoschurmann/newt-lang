@@ -67,6 +67,10 @@ static int run_single_fixture(const char *dir_path, const char *name) {
     if (!expect_content) {
         if (sema_ctx.errors->count > 0) {
             test_log("      %s✗%s %-30s (Unexpected sema errors)\n", COL_RED, COL_RESET, name);
+            for (size_t i = 0; i < sema_ctx.errors->count; i++) {
+                TypeError *err = (TypeError*)dynarray_get(sema_ctx.errors, i);
+                test_log("        -> Error %zu: Kind %d at %s:%u:%u\n", i + 1, err->kind, err->filename, err->span.start_line, err->span.start_col);
+            }
             arena_destroy(arena);
             return 0;
         }
@@ -108,6 +112,10 @@ static int run_single_fixture(const char *dir_path, const char *name) {
         }
     } else if (sema_ctx.errors->count > 0) {
         test_log("      %s✗%s %-30s (Unexpected sema errors)\n", COL_RED, COL_RESET, name);
+        for (size_t i = 0; i < sema_ctx.errors->count; i++) {
+            TypeError *err = (TypeError*)dynarray_get(sema_ctx.errors, i);
+            test_log("        -> Error %zu: Kind %d at %s:%u:%u\n", i + 1, err->kind, err->filename, err->span.start_line, err->span.start_col);
+        }
         success = 0;
     }
 

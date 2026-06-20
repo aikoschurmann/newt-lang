@@ -38,5 +38,6 @@ TEST_CASE_PRIO("Codegen: Loops", 40) {
 #include "codegen_arrays.inc"
 #include "codegen_intrinsics.inc"
 #include "codegen_defer.inc"
+#include "codegen_generics.inc"
 
 #undef CODEGEN_EXIT

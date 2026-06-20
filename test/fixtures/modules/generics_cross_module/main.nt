@@ -1,0 +1,10 @@
+import .lib_generic { Box };
+
+fn main() -> i32 {
+    b1: Box<i32>;
+    b2: Box<i8>;
+    b1.set(200);
+    b2.set(50);
+    
+    return b1.get() + (b2.get() as i32);
+}

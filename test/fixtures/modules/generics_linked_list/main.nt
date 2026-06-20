@@ -1,0 +1,20 @@
+import .list { Node, List };
+
+fn main() -> i32 {
+    list: List<i32>;
+    list.init();
+
+    n1: Node<i32>;
+    n1.value = 10;
+    list.push_front(&n1);
+
+    n2: Node<i32>;
+    n2.value = 20;
+    list.push_front(&n2);
+
+    n3: Node<i32>;
+    n3.value = 30;
+    list.push_front(&n3);
+
+    return list.sum();
+}

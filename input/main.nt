@@ -1,55 +1,49 @@
-import std;
 import std.math;
-
-alias Allocator = std.mem.Allocator;
-alias Arena = std.arena.Arena;
-
-pub struct Node {
-    val: i32;
-    next: *Node;
-}
+import std.libc;
 
 fn main() -> i32 {
-    arena: Arena = Arena.new(1024);
-    defer { arena.destroy(); }
+    print("=== Math Library Demo ===\n");
 
-    a: Allocator = arena.get_allocator();
+    // --- 1. Generic Absolute Value ---
+    i: i32 = -42;
+    f: f64 = -3.14159;
+    
+    res_i: i32 = std.math.abs<i32>(i);
+    res_f: f64 = std.math.abs<f64>(f);
 
-    head: *Node = null;
-    tail: *Node = null;
+    print("abs(", i, ")      = ", res_i, "\n");
+    print("abs(", f, ") = ", res_f, "\n\n");
 
-    // 1. Build the linked list
-    for (i: i32 = 1; i <= 5; i += 1) {
-        node: *Node = @alloc(Node, a, 1);
-        if node == null {
-            print("Allocation failed!\n");
-            return 1;
-        }
+    // --- 2. Generic Min / Max ---
+    a: i64 = 100;
+    b: i64 = 250;
+    
+    smallest: i64 = std.math.min<i64>(a, b);
+    largest: i64 = std.math.max<i64>(a, b);
 
-        node.val = i * 10;
-        node.next = null;
+    print("min(", a, ", ", b, ") = ", smallest, "\n");
+    print("max(", a, ", ", b, ") = ", largest, "\n\n");
 
-        if head == null {
-            head = node;
-        } else {
-            tail.next = node;
-        }
-        tail = node;
-    }
+    // --- 3. Generic Clamp ---
+    // Clamping a float that is way over the limit
+    val: f64 = 15.5;
+    lo: f64 = 0.0;
+    hi: f64 = 10.0;
+    clamped: f64 = std.math.clamp<f64>(val, lo, hi);
 
-    // 2. Traverse the list and process values
-    total: f64 = 0.0;
-    curr: *Node = head;
+    print("clamp(", val, ", ", lo, ", ", hi, ") = ", clamped, "\n\n");
 
-    while curr != null {
-        sqr: f64 = (curr.val * curr.val) as f64;
-        s: f64 = std.math.sqrt(sqr);
-        print("Val: ", curr.val, ", Sqr: ", sqr, ", Sqrt: ", s, "\n");
+    // --- 4. Advanced Math (f64 native) ---
+    pi: f64 = std.math.PI;
+    
+    // sin(PI / 2) should be 1.0
+    sine_val: f64 = std.math.sin(pi / 2.0); 
+    
+    // sqrt(144) should be 12.0
+    root_val: f64 = std.math.sqrt(144.0);   
 
-        total += sqr;
-        curr = curr.next;
-    }
+    print("sin(PI / 2.0)  = ", sine_val, "\n");
+    print("sqrt(144.0)    = ", root_val, "\n");
 
-    print("Total accumulated sqr: ", total, "\n");
     return 0;
 }

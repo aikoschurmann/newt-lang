@@ -4,14 +4,16 @@ pub struct Allocator {
     _free: fn(*void, *void) -> void;
 }
 
-pub fn Allocator.alloc(self: *Allocator, size: i64) -> *void {
-    return self._alloc(self.ctx, size);
-}
+impl Allocator {
+    pub fn alloc(self: *Allocator, size: i64) -> *void {
+        return self._alloc(self.ctx, size);
+    }
 
-pub fn Allocator.alloc(self: *Allocator, count: i64, size: i64) -> *void {
-    return self.alloc(count * size);
-}
+    pub fn alloc(self: *Allocator, count: i64, size: i64) -> *void {
+        return self.alloc(count * size);
+    }
 
-pub fn Allocator.free(self: *Allocator, ptr: *void) -> void {
-    self._free(self.ctx, ptr);
+    pub fn free(self: *Allocator, ptr: *void) -> void {
+        self._free(self.ctx, ptr);
+    }
 }

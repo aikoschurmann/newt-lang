@@ -10,5 +10,6 @@
 TEST_CASE_PRIO("Parser: Invalid Syntax", 20) {
     ASSERT(!test_is_parse_valid("fn main() { x: i32 = ; }"));
     ASSERT(!test_is_parse_valid("fn main() { if true return 1; }")); // missing parens
+    ASSERT(!test_is_parse_valid("import std; fn main() { p: *i32 = @alloc(10, std.heap.allocator, 1); }")); // bad alloc type
     return 1;
 }

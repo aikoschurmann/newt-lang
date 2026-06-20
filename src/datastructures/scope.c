@@ -180,6 +180,7 @@ Symbol *scope_lookup_symbol(Scope *scope, InternResult *rec, const char *caller_
              if (symbol) {
                  // 0. Transparent Alias Resolution
                  while (symbol && symbol->kind == SYMBOL_VALUE_ALIAS) {
+                     if (!symbol->target_symbol) break; // Direct type binding
                      symbol = symbol->target_symbol;
                  }
                  if (!symbol) {
@@ -216,6 +217,7 @@ Symbol *scope_lookup_symbol(Scope *scope, InternResult *rec, const char *caller_
     }
     return NULL;
 }
+
 
 Symbol *symbol_set_value_int(Symbol *symbol, int value){
     if (!symbol) return NULL;

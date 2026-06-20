@@ -1,0 +1,103 @@
+import .mem;
+
+pub struct ListNode<T> {
+    val: T;
+    next: *ListNode<T>;
+    prev: *ListNode<T>;
+}
+
+pub struct LinkedList<T> {
+    head: *ListNode<T>;
+    tail: *ListNode<T>;
+    len: i64;
+    allocator: *mem.Allocator;
+}
+
+impl<T> LinkedList<T> {
+    pub fn init(self: *LinkedList<T>, allocator: *mem.Allocator) -> void {
+        self.head = null as *ListNode<T>;
+        self.tail = null as *ListNode<T>;
+        self.len = 0;
+        self.allocator = allocator;
+    }
+
+    pub fn push_back(self: *LinkedList<T>, val: T) -> void {
+        node: *ListNode<T> = @alloc(ListNode<T>, self.allocator, 1);
+        node.val = val;
+        node.next = null as *ListNode<T>;
+        node.prev = self.tail;
+
+        if (self.tail != null as *ListNode<T>) {
+            self.tail.next = node;
+        } else {
+            self.head = node;
+        }
+        self.tail = node;
+        self.len = self.len + 1;
+    }
+
+    pub fn push_front(self: *LinkedList<T>, val: T) -> void {
+        node: *ListNode<T> = @alloc(ListNode<T>, self.allocator, 1);
+        node.val = val;
+        node.prev = null as *ListNode<T>;
+        node.next = self.head;
+
+        if (self.head != null as *ListNode<T>) {
+            self.head.prev = node;
+        } else {
+            self.tail = node;
+        }
+        self.head = node;
+        self.len = self.len + 1;
+    }
+
+    pub fn pop_back(self: *LinkedList<T>) -> T {
+        // Warning: UB if empty
+        node: *ListNode<T> = self.tail;
+        val: T = node.val;
+        
+        self.tail = node.prev;
+        if (self.tail != null as *ListNode<T>) {
+            self.tail.next = null as *ListNode<T>;
+        } else {
+            self.head = null as *ListNode<T>;
+        }
+        
+        @free(self.allocator, node);
+        self.len = self.len - 1;
+        return val;
+    }
+
+    pub fn pop_front(self: *LinkedList<T>) -> T {
+        // Warning: UB if empty
+        node: *ListNode<T> = self.head;
+        val: T = node.val;
+        
+        self.head = node.next;
+        if (self.head != null as *ListNode<T>) {
+            self.head.prev = null as *ListNode<T>;
+        } else {
+            self.tail = null as *ListNode<T>;
+        }
+        
+        self.allocator.free(node as *void);
+        self.len = self.len - 1;
+        return val;
+    }
+
+    pub fn free(self: *LinkedList<T>) -> void {
+        curr: *ListNode<T> = self.head;
+        while (curr != null as *ListNode<T>) {
+            next: *ListNode<T> = curr.next;
+            @free(self.allocator, curr);
+            curr = next;
+        }
+        self.head = null as *ListNode<T>;
+        self.tail = null as *ListNode<T>;
+        self.len = 0;
+    }
+
+    pub fn is_empty(self: *LinkedList<T>) -> bool {
+        return self.len == 0;
+    }
+}

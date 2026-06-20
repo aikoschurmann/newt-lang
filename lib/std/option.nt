@@ -1,0 +1,17 @@
+pub struct Option<T> {
+    is_some: bool;
+    value: T;
+}
+
+impl Option<T> {
+    pub fn some(val: T) -> Option<T> {
+        return Option<T> {
+            is_some: true,
+            value: val,
+        };
+    }
+
+    pub fn none() -> Option<T> {
+
+    }
+}

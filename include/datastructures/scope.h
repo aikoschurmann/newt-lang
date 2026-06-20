@@ -25,7 +25,9 @@ typedef enum {
     SYMBOL_VALUE_MODULE,   // Added for imported modules
     SYMBOL_VALUE_NAMESPACE, // Added for synthetic namespace path components
     SYMBOL_VALUE_ALIAS,    // Added for local aliases
-    SYMBOL_OVERLOAD_SET    // Added for function overloading
+    SYMBOL_OVERLOAD_SET,    // Added for function overloading
+    SYMBOL_GENERIC_FUNCTION, // Added for generic function templates
+    SYMBOL_GENERIC_STRUCT   // Added for generic struct templates
 } SymbolValue;
 
 
@@ -99,7 +101,7 @@ Scope *scope_create(Arena *arena, Scope *parent, int identifier_count, int kind)
 
 // Symbol management
 Symbol *scope_define_symbol(Scope *scope, InternResult *name, Type *type, SymbolValue kind, const char *filename, bool is_pub, AstNode *decl_node);
-Symbol *scope_lookup_symbol(Scope *scope, InternResult *name, const char *caller_filename);
+Symbol *scope_lookup_symbol(Scope *scope, InternResult *rec, const char *caller_filename);
 Symbol *scope_lookup_symbol_local(Scope *scope, InternResult *name);
 
 // Overload set helpers
