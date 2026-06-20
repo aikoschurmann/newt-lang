@@ -95,6 +95,7 @@ typedef enum {
     TOK_COMMENT,
     TOK_EOF,
     TOK_STRUCT,
+    TOK_IMPL,
     TOK_AS,
     TOK_UNKNOWN
 
