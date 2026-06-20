@@ -226,10 +226,11 @@ static LLVMValueRef codegen_expr_struct_literal(CodegenContext *ctx, AstNode *ex
 static LLVMValueRef codegen_expr_initializer_list(CodegenContext *ctx, AstNode *expr) {
     AstInitializeList *list = &expr->data.initializer_list;
     Type *t = expr->type;
-    if (t->kind != TYPE_ARRAY) ICE("Initializer list must have array type in Codegen");
+    bool is_slice = (t->kind == TYPE_SLICE);
+    if (t->kind != TYPE_ARRAY && t->kind != TYPE_SLICE) ICE("Initializer list must have array/slice type in Codegen");
 
-    LLVMTypeRef arr_ty = get_llvm_type(ctx, t);
-    LLVMTypeRef elem_ty = get_llvm_type(ctx, t->as.array.base);
+    LLVMTypeRef arr_ty = is_slice ? LLVMArrayType(get_llvm_type(ctx, t->as.slice.base), (unsigned)list->elements->count) : get_llvm_type(ctx, t);
+    LLVMTypeRef elem_ty = get_llvm_type(ctx, is_slice ? t->as.slice.base : t->as.array.base);
 
     // Check if the LLVM builder is active
     bool is_global = LLVMGetInsertBlock(ctx->builder) == NULL;
@@ -251,6 +252,22 @@ static LLVMValueRef codegen_expr_initializer_list(CodegenContext *ctx, AstNode *
         AstNode *elem = *(AstNode**)dynarray_get(list->elements, i);
         LLVMValueRef elem_val = codegen_expr(ctx, elem);
         arr_val = LLVMBuildInsertValue(ctx->builder, arr_val, elem_val, (unsigned)i, "arr_init");
+    }
+
+    if (is_slice) {
+        LLVMValueRef alloca = LLVMBuildAlloca(ctx->builder, arr_ty, "slice_lit_alloca");
+        LLVMBuildStore(ctx->builder, arr_val, alloca);
+        
+        LLVMTypeRef slice_ty = get_llvm_type(ctx, t);
+        LLVMValueRef slice_val = LLVMGetUndef(slice_ty);
+        
+        // ptr is the alloca, which is already a pointer to the array (and thus its first element)
+        LLVMTypeRef ptr_ty = LLVMPointerType(elem_ty, 0);
+        LLVMValueRef ptr_cast = LLVMBuildBitCast(ctx->builder, alloca, ptr_ty, "slice_lit_ptr");
+        
+        slice_val = LLVMBuildInsertValue(ctx->builder, slice_val, ptr_cast, 0, "slice_ptr");
+        slice_val = LLVMBuildInsertValue(ctx->builder, slice_val, LLVMConstInt(LLVMInt64TypeInContext(ctx->context), list->elements->count, 0), 1, "slice_len");
+        return slice_val;
     }
 
     return arr_val;

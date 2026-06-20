@@ -814,6 +814,36 @@ static void resolve_program_methods(TypeCheckContext *ctx, Scope *global_scope) 
                     AstFunctionDeclaration *func = &method_decl->data.function_declaration;
                     func->target_type_node = impl->target_type_node;
                     
+                    if (func->type_params && func->type_params->count > 0) {
+                        Symbol *sym = arena_alloc(ctx->store->arena, sizeof(Symbol));
+                        sym->name_rec = func->intern_result;
+                        sym->type = NULL;
+                        sym->kind = SYMBOL_GENERIC_FUNCTION;
+                        sym->decl_node = method_decl;
+                        sym->is_pub = func->is_pub;
+                        sym->filename = method_decl->filename;
+                        sym->overloads = arena_alloc(ctx->store->arena, sizeof(DynArray));
+            dynarray_init_in_arena(sym->overloads, ctx->store->arena, sizeof(Symbol*), 4);
+
+                        Symbol *existing_method = (Symbol*)hashmap_get(target_type->as.struct_type.methods, func->intern_result->key, ptr_hash, ptr_cmp);
+                        if (existing_method) {
+                            if (existing_method->kind == SYMBOL_VALUE_FUNCTION || existing_method->kind == SYMBOL_GENERIC_FUNCTION) {
+                                Symbol *set = scope_make_overload_set(ctx->store->arena, existing_method, sym);
+                                hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, set, ptr_hash, ptr_cmp);
+                            } else if (existing_method->kind == SYMBOL_OVERLOAD_SET) {
+                                scope_overload_set_add(existing_method, sym, ctx->store->arena);
+                            }
+                        } else {
+                            hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, sym, ptr_hash, ptr_cmp);
+                        }
+                        
+                        CompilationUnit *unit = module_loader_get_unit(ctx->loader, decl->filename);
+                        if (unit && unit->generic_templates) {
+                            hashmap_put(unit->generic_templates, func->intern_result->key, method_decl, ptr_hash, ptr_cmp);
+                        }
+                        continue;
+                    }
+
                     resolve_function_decl(ctx, global_scope, method_decl);
                     
                     Symbol *sym = arena_alloc(ctx->store->arena, sizeof(Symbol));
@@ -826,7 +856,7 @@ static void resolve_program_methods(TypeCheckContext *ctx, Scope *global_scope) 
                     
                     Symbol *existing_method = (Symbol*)hashmap_get(target_type->as.struct_type.methods, func->intern_result->key, ptr_hash, ptr_cmp);
                     if (existing_method) {
-                        if (existing_method->kind == SYMBOL_VALUE_FUNCTION) {
+                        if (existing_method->kind == SYMBOL_VALUE_FUNCTION || existing_method->kind == SYMBOL_GENERIC_FUNCTION) {
                             Symbol *set = scope_make_overload_set(ctx->store->arena, existing_method, sym);
                             hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, set, ptr_hash, ptr_cmp);
                         } else if (existing_method->kind == SYMBOL_OVERLOAD_SET) {
@@ -848,12 +878,12 @@ static void resolve_program_methods(TypeCheckContext *ctx, Scope *global_scope) 
 
         ctx->filename = decl->filename;
 
-        // Skip generic method templates or methods on generic template structs
+        // Skip methods on generic template structs
         Symbol *target_sym = NULL;
         if (func->target_type_node->node_type == AST_IDENTIFIER) {
             target_sym = scope_lookup_symbol(global_scope, func->target_type_node->data.identifier.intern_result, ctx->filename);
         }
-        if ((func->type_params && func->type_params->count > 0) || (target_sym && target_sym->kind == SYMBOL_GENERIC_STRUCT)) {
+        if (target_sym && target_sym->kind == SYMBOL_GENERIC_STRUCT) {
             continue;
         }
 
@@ -863,6 +893,36 @@ static void resolve_program_methods(TypeCheckContext *ctx, Scope *global_scope) 
             TypeError err = { .kind = TE_UNDECLARED, .span = func->target_type_node->span, .filename = ctx->filename };
             err.as.name.name = "Method must be bound to a struct type";
             dynarray_push_value(ctx->errors, &err);
+            continue;
+        }
+
+        if (func->type_params && func->type_params->count > 0) {
+            Symbol *sym = arena_alloc(ctx->store->arena, sizeof(Symbol));
+            sym->name_rec = func->intern_result;
+            sym->type = NULL;
+            sym->kind = SYMBOL_GENERIC_FUNCTION;
+            sym->decl_node = decl;
+            sym->is_pub = func->is_pub;
+            sym->filename = decl->filename;
+            sym->overloads = arena_alloc(ctx->store->arena, sizeof(DynArray));
+            dynarray_init_in_arena(sym->overloads, ctx->store->arena, sizeof(Symbol*), 4);
+
+            Symbol *existing_method = (Symbol*)hashmap_get(target_type->as.struct_type.methods, func->intern_result->key, ptr_hash, ptr_cmp);
+            if (existing_method) {
+                if (existing_method->kind == SYMBOL_VALUE_FUNCTION || existing_method->kind == SYMBOL_GENERIC_FUNCTION) {
+                    Symbol *set = scope_make_overload_set(ctx->store->arena, existing_method, sym);
+                    hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, set, ptr_hash, ptr_cmp);
+                } else if (existing_method->kind == SYMBOL_OVERLOAD_SET) {
+                    scope_overload_set_add(existing_method, sym, ctx->store->arena);
+                }
+            } else {
+                hashmap_put(target_type->as.struct_type.methods, func->intern_result->key, sym, ptr_hash, ptr_cmp);
+            }
+            
+            CompilationUnit *unit = module_loader_get_unit(ctx->loader, decl->filename);
+            if (unit && unit->generic_templates) {
+                hashmap_put(unit->generic_templates, func->intern_result->key, decl, ptr_hash, ptr_cmp);
+            }
             continue;
         }
 
@@ -1776,6 +1836,27 @@ Symbol *instantiate_generic_method(TypeCheckContext *ctx, Scope *scope, Type *in
     InternResult *mono_m_res = intern(ctx->identifiers, &m_slice, NULL);
     
     mono_func->intern_result = orig_name; 
+    
+    if (orig_func->type_params && orig_func->type_params->count > 0) {
+        mono_func->type_params = orig_func->type_params; 
+        if (mono_func->target_type_node && mono_func->target_type_node->node_type == AST_IDENTIFIER) {
+            mono_func->target_type_node->data.identifier.intern_result = concrete_struct->as.struct_type.name;
+        }
+        
+        Symbol *method_sym = arena_alloc(ctx->store->arena, sizeof(Symbol));
+        method_sym->name_rec = mono_func->intern_result;
+        method_sym->kind = SYMBOL_GENERIC_FUNCTION;
+        method_sym->decl_node = mono_method;
+        method_sym->is_pub = mono_func->is_pub;
+        method_sym->filename = mono_method->filename;
+        method_sym->module_scope = inst_scope; // Save struct's generic bindings
+        method_sym->overloads = arena_alloc(ctx->store->arena, sizeof(DynArray));
+        dynarray_init_in_arena(method_sym->overloads, ctx->store->arena, sizeof(Symbol*), 4);
+        
+        hashmap_put(concrete_struct->as.struct_type.methods, orig_name->key, method_sym, ptr_hash, ptr_cmp);
+        return method_sym;
+    }
+
     mono_func->type_params = NULL; 
     if (mono_func->target_type_node && mono_func->target_type_node->node_type == AST_IDENTIFIER) {
         mono_func->target_type_node->data.identifier.intern_result = concrete_struct->as.struct_type.name;
@@ -1869,8 +1950,9 @@ Symbol *instantiate_generic_function(TypeCheckContext *ctx, Scope *scope, Symbol
     }
     
     // The function's parent scope should be the global scope where it was DEFINED!
+    // If it's a generic method on a generic struct, sym->module_scope holds the struct's instantiation scope.
     CompilationUnit *unit = module_loader_get_unit(ctx->loader, sym->filename);
-    Scope *parent_global = unit ? unit->global_scope : scope;
+    Scope *parent_global = sym->module_scope ? sym->module_scope : (unit ? unit->global_scope : scope);
     
     AstNode *mono_node = ast_clone_node(decl_node, ctx->store->arena);
     if (!mono_node) return NULL;

@@ -2,7 +2,7 @@
 
 SEMA_VALID("generic_fn_basic", "fn id<T>(x: T) -> T { return x; } fn main() { a: i32 = id<i32>(42); }")
 SEMA_VALID("generic_fn_multiple", "fn pair<T, U>(x: T, y: U) -> T { return x; } fn main() { a: f64 = pair<f64, i32>(3.14, 42); }")
-SEMA_ERROR("generic_fn_missing_args", "fn id<T>(x: T) -> T { return x; } fn main() { a: i32 = id(42); }", TE_MISSING_TYPE_ARGS)
+SEMA_VALID("generic_fn_infer", "fn id<T>(x: T) -> T { return x; } fn main() { a: i32 = id(42); }")
 SEMA_ERROR("generic_fn_arg_mismatch", "fn id<T>(x: T) -> T { return x; } fn main() { a: i32 = id<f64>(42); }", TE_TYPE_MISMATCH)
 SEMA_ERROR("generic_fn_return_mismatch", "fn id<T>(x: T) -> T { return x; } fn main() { a: *i32 = id<i32>(42); }", TE_TYPE_MISMATCH)
 SEMA_VALID("generic_fn_nested_call", "fn id<T>(x: T) -> T { return x; } fn main() { a: i32 = id<i32>(id<i32>(42)); }")
@@ -28,3 +28,10 @@ SEMA_VALID("generic_impl_basic", "struct Box<T> { val: T; } impl<T> Box<T> { fn 
 SEMA_ERROR("generic_impl_missing_args", "struct Box<T> { val: T; } impl Box { fn get(self: *Box<T>) -> T { return self.val; } } fn main() {}", TE_GENERIC_ARG_MISMATCH)
 SEMA_ERROR("generic_impl_too_many_args", "struct Box<T> { val: T; } impl<T> Box<T, i32> { fn get(self: *Box<T>) -> T { return self.val; } } fn main() {}", TE_GENERIC_ARG_MISMATCH)
 SEMA_ERROR("generic_impl_method_arg_mismatch", "struct Box<T> { val: T; } impl<T> Box<T> { fn set(self: *Box<T>, v: T) -> void { self.val = v; } } fn main() { b: Box<i32>; b.set(3.14); }", TE_TYPE_MISMATCH)
+
+SEMA_VALID("generic_fn_infer_complex", "fn id<T>(x: T[]) -> T[] { return x; } fn main() { a: i32[] = id({1, 2, 3}); }")
+SEMA_VALID("generic_fn_infer_args", "fn first<T>(a: T, b: T) -> T { return a; } fn main() { a: i32 = first(42, 10); }")
+SEMA_ERROR("generic_fn_infer_conflict", "fn first<T>(a: T, b: T) -> T { return a; } fn main() { a: i32 = first(42, 3.14); }", TE_MISSING_TYPE_ARGS)
+SEMA_ERROR("generic_fn_infer_conflict_no_return", "fn first<T>(a: T, b: T) -> T { return a; } fn main() { first(42, 3.14); }", TE_MISSING_TYPE_ARGS)
+SEMA_VALID("generic_fn_infer_pointer", "fn id_ptr<T>(x: *T) -> *T { return x; } fn main() { v: i32 = 42; p: *i32 = id_ptr(&v); }")
+SEMA_VALID("generic_method_infer", "struct Vec<T> { data: T[]; } impl<T> Vec<T> { fn push(self: *Vec<T>, val: T) {} } fn main() { v: Vec<i32>; v.push(42); }")

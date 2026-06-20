@@ -157,4 +157,5 @@ Type *make_generic_inst_type(TypeStore *ts, Type *base, Type **args, size_t arg_
 // --- Generic type substitution ---
 // Recursively substitutes TYPE_TYPEVAR nodes with their concrete bindings.
 // bindings: HashMap mapping InternResult* (typevar name key) -> Type* (concrete type)
+Type *make_typevar_type(TypeStore *ts, InternResult *name, int index);
 Type *type_substitute(TypeStore *ts, Type *t, HashMap *bindings);

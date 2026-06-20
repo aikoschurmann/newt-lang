@@ -95,7 +95,12 @@ LLVMValueRef codegen_expr_ops(CodegenContext *ctx, AstNode *expr) {
         } else {
             // Special Case: Array to Slice (Fat Pointer)
             if (cast_node->expr->type->kind == TYPE_ARRAY && cast_node->target_type->kind == TYPE_SLICE) {
-                // val is the pointer to the array (from codegen_expr_ident)
+                // If val is not a pointer (e.g., an inline array value from an initializer list), spill it.
+                if (LLVMGetTypeKind(LLVMTypeOf(val)) != LLVMPointerTypeKind) {
+                    LLVMValueRef alloca = LLVMBuildAlloca(ctx->builder, LLVMTypeOf(val), "array_spill");
+                    LLVMBuildStore(ctx->builder, val, alloca);
+                    val = alloca;
+                }
                 return codegen_materialize_slice(ctx, val, cast_node->expr->type, cast_node->target_type);
             }
 

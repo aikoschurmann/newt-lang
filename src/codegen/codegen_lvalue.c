@@ -119,9 +119,9 @@ static LLVMValueRef codegen_lvalue_member(CodegenContext *ctx, AstNode *expr) {
     return NULL;
 }
 
-static LLVMValueRef codegen_lvalue_literal(CodegenContext *ctx, AstNode *expr) {
+static LLVMValueRef codegen_materialize_rvalue(CodegenContext *ctx, AstNode *expr) {
     LLVMTypeRef ty = get_llvm_type(ctx, expr->type);
-    LLVMValueRef slot = LLVMBuildAlloca(ctx->builder, ty, "literal_mem");
+    LLVMValueRef slot = create_entry_block_alloca(ctx, ty, "rvalue_tmp");
     LLVMValueRef val = codegen_expr(ctx, expr);
     LLVMBuildStore(ctx->builder, val, slot);
     return slot;
@@ -140,11 +140,18 @@ LLVMValueRef codegen_lvalue(CodegenContext *ctx, AstNode *expr) {
                 return codegen_expr(ctx, expr->data.unary_expr.expr);
             }
             break;
-        case AST_STRUCT_LITERAL:
-        case AST_INITIALIZER_LIST: return codegen_lvalue_literal(ctx, expr);
+        case AST_CAST: {
+            Type *target = expr->type;
+            if (target->kind == TYPE_SLICE || target->kind == TYPE_POINTER) {
+                // If it's a pointer or slice cast, it's not a true lvalue preserving cast
+                break;
+            }
+            return codegen_lvalue(ctx, expr->data.cast_expr.expr);
+        }
         default: break;
     }
 
-    ICE_AT(expr, "Unhandled lvalue node type %d", expr->node_type);
-    return NULL;
+    // Fallback: any rvalue that is asked to be an lvalue (e.g. for a byval parameter)
+    // must be materialized into a temporary stack slot.
+    return codegen_materialize_rvalue(ctx, expr);
 }

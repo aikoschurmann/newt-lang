@@ -12,6 +12,8 @@
 #include "sema/type.h"
 #include <string.h>
 
+bool infer_type_args(Type *expected, Type *provided, Type **inferred_args, size_t count);
+
 static Symbol *find_struct_method(TypeCheckContext *ctx, Scope *scope, Type *target_type, InternResult *method_name) {
     if (!target_type || !method_name) return NULL;
     
@@ -420,7 +422,59 @@ static Symbol* resolve_overload_candidate(TypeCheckContext *ctx, AstNode *expr, 
     return best;
 }
 
-Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
+static Type* substitute_type_args(TypeStore *ts, Type *t, Type **inferred, size_t count) {
+    if (!t || !inferred) return t;
+    switch (t->kind) {
+        case TYPE_TYPEVAR: {
+            int idx = t->as.typevar.index;
+            if (idx >= 0 && (size_t)idx < count && inferred[idx]) return inferred[idx];
+            return t;
+        }
+        case TYPE_POINTER: {
+            Type *b = substitute_type_args(ts, t->as.ptr.base, inferred, count);
+            if (b == t->as.ptr.base) return t;
+            return make_pointer_type(ts, b);
+        }
+        case TYPE_ARRAY: {
+            Type *b = substitute_type_args(ts, t->as.array.base, inferred, count);
+            if (b == t->as.array.base) return t;
+            return make_array_type(ts, b, t->as.array.size);
+        }
+        case TYPE_SLICE: {
+            Type *b = substitute_type_args(ts, t->as.slice.base, inferred, count);
+            if (b == t->as.slice.base) return t;
+            return make_slice_type(ts, b);
+        }
+        default: return t;
+    }
+}
+
+static bool contains_typevar(Type *t) {
+    if (!t) return false;
+    switch (t->kind) {
+        case TYPE_TYPEVAR: return true;
+        case TYPE_POINTER: return contains_typevar(t->as.ptr.base);
+        case TYPE_ARRAY:   return contains_typevar(t->as.array.base);
+        case TYPE_SLICE:   return contains_typevar(t->as.slice.base);
+        case TYPE_FUNCTION: {
+            if (contains_typevar(t->as.func.return_type)) return true;
+            for (size_t i = 0; i < t->as.func.param_count; i++) {
+                if (contains_typevar(t->as.func.params[i])) return true;
+            }
+            return false;
+        }
+        case TYPE_GENERIC_INST: {
+            if (contains_typevar(t->as.generic_inst.concrete_type)) return true;
+            for (size_t i = 0; i < t->as.generic_inst.arg_count; i++) {
+                if (contains_typevar(t->as.generic_inst.args[i])) return true;
+            }
+            return false;
+        }
+        default: return false;
+    }
+}
+
+Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     AstCallExpr *call = &expr->data.call_expr;
     
     AstNode *callee_base = call->callee;
@@ -488,7 +542,7 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
 
     // OVERLOAD RESOLUTION LOOP
     if (callee_sym && callee_sym->kind == SYMBOL_OVERLOAD_SET) {
-        size_t n_cands = callee_sym->overloads->count;
+        // size_t n_cands = callee_sym->overloads->count; // unused
 
         // Pass 1: Type-check args
         Type **arg_types = arena_alloc(ctx->store->arena, sizeof(Type*) * (arg_count ? arg_count : 1));
@@ -514,28 +568,94 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
 
         if (callee_sym->kind == SYMBOL_GENERIC_FUNCTION || callee_sym->kind == SYMBOL_GENERIC_STRUCT) {
             if (call->callee->node_type != AST_GENERIC_INST_EXPR) {
+                if (callee_sym->kind == SYMBOL_GENERIC_FUNCTION) {
+                    AstNode *decl_node = callee_sym->decl_node;
+                    if (decl_node && decl_node->node_type == AST_FUNCTION_DECLARATION) {
+                        AstFunctionDeclaration *fdecl = &decl_node->data.function_declaration;
+                        size_t type_param_count = fdecl->type_params ? fdecl->type_params->count : 0;
+                        if (type_param_count > 0) {
+                            Scope *temp_scope = scope_create(ctx->store->arena, scope, type_param_count, SCOPE_IDENTIFIERS);
+                            for (size_t i = 0; i < type_param_count; i++) {
+                                InternResult *tp_name = *(InternResult**)dynarray_get(fdecl->type_params, i);
+                                Type *tvar = make_typevar_type(ctx->store, tp_name, (int)i);
+                                define_symbol_or_error(ctx, temp_scope, tp_name, tvar, SYMBOL_VALUE_TYPE, expr->span, false, ctx->filename, NULL);
+                            }
+
+                            size_t param_count = fdecl->params ? fdecl->params->count : 0;
+                            Type **expected_params = arena_alloc(ctx->store->arena, sizeof(Type*) * param_count);
+                            for (size_t i = 0; i < param_count; i++) {
+                                AstNode *param_node = *(AstNode**)dynarray_get(fdecl->params, i);
+                                expected_params[i] = resolve_ast_type(ctx, temp_scope, param_node->data.param.type);
+                            }
+
+                            Type **inferred = arena_alloc(ctx->store->arena, sizeof(Type*) * type_param_count);
+                            memset(inferred, 0, sizeof(Type*) * type_param_count);
+                            bool inference_ok = true;
+                            
+                            if (expected_type && fdecl->return_type) {
+                                Type *expected_return = resolve_ast_type(ctx, temp_scope, fdecl->return_type);
+                                infer_type_args(expected_return, expected_type, inferred, type_param_count);
+                            }
+
+                            Type **provided_args = arena_alloc(ctx->store->arena, sizeof(Type*) * (arg_count ? arg_count : 1));
+                            size_t p_idx = is_instance_method ? 1 : 0;
+                            
+                            for (size_t i = 0; i < arg_count; i++) {
+                                AstNode *arg = *(AstNode**)dynarray_get(call->args, i);
+                                Type *arg_expected = NULL;
+                                if (p_idx + i < param_count) {
+                                    arg_expected = expected_params[p_idx + i];
+                                    arg_expected = substitute_type_args(ctx->store, arg_expected, inferred, type_param_count);
+                                    if (contains_typevar(arg_expected)) {
+                                        arg_expected = NULL;
+                                    }
+                                }
+                                provided_args[i] = check_expression(ctx, scope, arg, arg_expected);
+                                if (p_idx + i < param_count) {
+                                    if (!infer_type_args(expected_params[p_idx + i], provided_args[i], inferred, type_param_count)) {
+                                        inference_ok = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            for (size_t i = 0; i < type_param_count; i++) {
+                                if (!inferred[i]) inference_ok = false;
+                            }
+                            
+                            if (inference_ok) {
+                                Symbol *inst_sym = instantiate_generic_function(ctx, scope, callee_sym, inferred, type_param_count, call->callee->span);
+                                if (inst_sym) {
+                                    callee_sym = inst_sym;
+                                    goto inference_success;
+                                }
+                            }
+                        }
+                    }
+                }
                 TypeError err = { .kind = TE_MISSING_TYPE_ARGS, .span = expr->span, .filename = ctx->filename };
                 err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
                 dynarray_push_value(ctx->errors, &err);
                 return NULL;
-            }
-
-            AstGenericInstExpr *inst = &call->callee->data.generic_inst_expr;
-            size_t count = inst->type_args ? inst->type_args->count : 0;
-            Type **arg_types = NULL;
-            if (count > 0) {
-                arg_types = arena_alloc(ctx->store->arena, sizeof(Type*) * count);
-                for (size_t i = 0; i < count; i++) {
-                    AstNode *arg_node = *(AstNode**)dynarray_get(inst->type_args, i);
-                    arg_types[i] = resolve_ast_type(ctx, scope, arg_node);
-                    if (!arg_types[i]) return NULL;
+            } else {
+                AstGenericInstExpr *inst = &call->callee->data.generic_inst_expr;
+                size_t count = inst->type_args ? inst->type_args->count : 0;
+                Type **arg_types = NULL;
+                if (count > 0) {
+                    arg_types = arena_alloc(ctx->store->arena, sizeof(Type*) * count);
+                    for (size_t i = 0; i < count; i++) {
+                        AstNode *arg_node = *(AstNode**)dynarray_get(inst->type_args, i);
+                        arg_types[i] = resolve_ast_type(ctx, scope, arg_node);
+                        if (!arg_types[i]) return NULL;
+                    }
                 }
+                
+                Symbol *inst_sym = instantiate_generic_function(ctx, scope, callee_sym, arg_types, count, call->callee->span);
+                if (!inst_sym) return NULL;
+                
+                callee_sym = inst_sym;
             }
-            
-            Symbol *inst_sym = instantiate_generic_function(ctx, scope, callee_sym, arg_types, count, call->callee->span);
-            if (!inst_sym) return NULL;
-            
-            callee_sym = inst_sym;
+inference_success:;
         }
         callee_type = callee_sym->type;
     }
@@ -1578,7 +1698,7 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
             result_type = check_identifier(ctx, scope, expr);
             break;
         case AST_CALL_EXPR:
-            result_type = check_call_expr(ctx, scope, expr);
+            result_type = check_call_expr(ctx, scope, expr, expected_type);
             break;
         case AST_GENERIC_INST_EXPR:
             result_type = check_generic_inst_expr(ctx, scope, expr);
@@ -1615,4 +1735,54 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
 
     expr->type = result_type;
     return result_type;
+}
+bool infer_type_args(Type *expected, Type *provided, Type **inferred_args, size_t count) {
+    if (!expected || !provided) return false;
+
+    if (expected->kind == TYPE_TYPEVAR) {
+        int idx = expected->as.typevar.index;
+        if (idx < 0 || (size_t)idx >= count) return false;
+
+        if (inferred_args[idx] == NULL) {
+            inferred_args[idx] = provided;
+            return true;
+        } else {
+            return inferred_args[idx] == provided;
+        }
+    }
+
+    if (expected->kind != provided->kind) {
+        if (expected->kind == TYPE_SLICE && provided->kind == TYPE_ARRAY) {
+            return infer_type_args(expected->as.slice.base, provided->as.array.base, inferred_args, count);
+        }
+        return false;
+    }
+
+    switch (expected->kind) {
+        case TYPE_POINTER:
+            return infer_type_args(expected->as.ptr.base, provided->as.ptr.base, inferred_args, count);
+        case TYPE_ARRAY:
+            if (expected->as.array.size != provided->as.array.size) return false;
+            return infer_type_args(expected->as.array.base, provided->as.array.base, inferred_args, count);
+        case TYPE_SLICE:
+            return infer_type_args(expected->as.slice.base, provided->as.slice.base, inferred_args, count);
+        case TYPE_GENERIC_INST:
+            if (expected->as.generic_inst.base != provided->as.generic_inst.base) return false;
+            if (expected->as.generic_inst.arg_count != provided->as.generic_inst.arg_count) return false;
+            for (size_t i = 0; i < expected->as.generic_inst.arg_count; i++) {
+                if (!infer_type_args(expected->as.generic_inst.args[i], provided->as.generic_inst.args[i], inferred_args, count)) {
+                    return false;
+                }
+            }
+            return true;
+        case TYPE_FUNCTION:
+            if (!infer_type_args(expected->as.func.return_type, provided->as.func.return_type, inferred_args, count)) return false;
+            if (expected->as.func.param_count != provided->as.func.param_count) return false;
+            for (size_t i = 0; i < expected->as.func.param_count; i++) {
+                if (!infer_type_args(expected->as.func.params[i], provided->as.func.params[i], inferred_args, count)) return false;
+            }
+            return true;
+        default:
+            return true;
+    }
 }

@@ -373,6 +373,14 @@ void register_primitives_to_scope(TypeStore *ts, Scope *universe_scope, DenseAre
 
 // --- Type construction helpers ---
 
+Type *make_typevar_type(TypeStore *ts, InternResult *name, int index) {
+    if (!ts || !name) return NULL;
+    Type proto = { .kind = TYPE_TYPEVAR, .as.typevar = { .name = name, .index = index } };
+    InternResult *res = intern_type(ts, &proto);
+    if (!res) return NULL;
+    return (Type*)((Slice*)res->key)->ptr;
+}
+
 Type *make_pointer_type(TypeStore *ts, Type *base) {
     if (!ts || !base) return NULL;
     Type proto = { .kind = TYPE_POINTER, .as.ptr.base = base };

@@ -103,6 +103,7 @@ static void codegen_var_proto(CodegenContext *ctx, AstNode *decl) {
 
 void codegen_decl_proto(CodegenContext *ctx, AstNode *decl) {
     if (decl->node_type == AST_FUNCTION_DECLARATION) {
+        if (decl->data.function_declaration.type_params && decl->data.function_declaration.type_params->count > 0) return;
         codegen_func_proto(ctx, decl);
     } else if (decl->node_type == AST_VARIABLE_DECLARATION) {
         codegen_var_proto(ctx, decl);
@@ -234,6 +235,7 @@ static void codegen_func_body(CodegenContext *ctx, AstNode *decl) {
 
 void codegen_decl_body(CodegenContext *ctx, AstNode *decl) {
     if (decl->node_type == AST_FUNCTION_DECLARATION) {
+        if (decl->data.function_declaration.type_params && decl->data.function_declaration.type_params->count > 0) return;
         codegen_func_body(ctx, decl);
     } else if (decl->node_type == AST_VARIABLE_DECLARATION) {
         AstVariableDeclaration *vdecl = &decl->data.variable_declaration;
