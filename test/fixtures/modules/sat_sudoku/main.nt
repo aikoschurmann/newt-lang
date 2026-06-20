@@ -22,7 +22,7 @@ struct Formula {
 
 fn sv(r: i32, c: i32, v: i32) -> i32 { return (r * 81) + (c * 9) + v + 1; }
 
-fn lit_val(assignment: *Val, lit: i32) -> Val {
+fn lit_val(assignment: Val[], lit: i32) -> Val {
     if lit > 0 {
         return assignment[lit as i64 - 1];
     } else {
@@ -70,7 +70,7 @@ impl Formula {
                 satisfied: bool = false;
 
                 for (j: i64 = 0; j < c.lits.len; j += 1) {
-                    v: Val = lit_val(&self.assignment[0], c.lits[j]);
+                    v: Val = lit_val(self.assignment, c.lits[j]);
                     if v == Val.True  { satisfied = true; break; }
                     if v == Val.Unassigned { unassigned += 1; last_lit = c.lits[j]; }
                 }
@@ -114,7 +114,7 @@ impl Formula {
             for (r: i32 = 0; r < 9; r += 1) {
                 for (c: i32 = 0; c < 9; c += 1) {
                     for (v: i32 = 0; v < 9; v += 1) {
-                        if (lit_val(&self.assignment[0], sv(r, c, v)) == Val.True) {
+                        if (lit_val(self.assignment, sv(r, c, v)) == Val.True) {
                             digit: i32 = v + 1;
                             total = total + (digit * digit);
                         }
@@ -218,11 +218,11 @@ fn build_sudoku(a: Allocator) -> Formula {
     }
 
     grid: *char = "42..6....5..084....87....5.7...5...23..7.2..06...1...5.5....17....308..4....7..68";
-    for (i: i32 = 0; i < 81; i += 1) {
-        ch: i8 = grid[i as i64] as i8;
-        if ch != 46 { 
-            val: i32 = (ch - 48) as i32; 
-            f.add_clause(a, { sv(i / 9, i % 9, val) });
+    for (i: i64 = 0; i < 81; i += 1) {
+        ch: char = grid[i];
+        if ch != '.' { 
+            val: i32 = (ch as i32) - ('0' as i32); 
+            f.add_clause(a, { sv((i / 9) as i32, (i % 9) as i32, val) });
         }
     }
 
