@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "sema/typecheck_expr.h"
 #include "sema/type_coerce.h"
 #include "sema/type_utils.h"
@@ -8,8 +9,51 @@
 #include "datastructures/scope.h"
 #include "core/error.h"
 #include <math.h>
-#include <stddef.h>
+#include "sema/type.h"
 #include <string.h>
+
+static Symbol *find_struct_method(TypeCheckContext *ctx, Scope *scope, Type *target_type, InternResult *method_name) {
+    if (!target_type || !method_name) return NULL;
+    
+    Type *underlying = target_type;
+    while (underlying && (underlying->kind == TYPE_POINTER || underlying->kind == TYPE_GENERIC_INST)) {
+        if (underlying->kind == TYPE_POINTER) {
+            underlying = underlying->as.ptr.base;
+        } else {
+            underlying = underlying->as.generic_inst.concrete_type;
+        }
+    }
+    
+    if (!underlying || underlying->kind != TYPE_STRUCT) return NULL;
+    
+    Symbol *method_sym = (Symbol*)hashmap_get(underlying->as.struct_type.methods, method_name->key, ptr_hash, ptr_cmp);
+    if (method_sym) return method_sym;
+    
+    // Lazy Monomorphization Fallback
+    Type *gen_inst = target_type;
+    while (gen_inst && gen_inst->kind == TYPE_POINTER) gen_inst = gen_inst->as.ptr.base;
+    if (gen_inst && gen_inst->kind == TYPE_GENERIC_INST) {
+        Type *base_type = gen_inst->as.generic_inst.base;
+        DynArray *impls = (DynArray*)hashmap_get(ctx->store->impl_registry, (void*)base_type, ptr_hash, ptr_cmp);
+        if (impls) {
+            for (size_t i = 0; i < impls->count; i++) {
+                AstNode *impl_node = *(AstNode**)dynarray_get(impls, i);
+                AstImplDeclaration *impl_decl = &impl_node->data.impl_declaration;
+                if (!impl_decl->methods) continue;
+                for (size_t m = 0; m < impl_decl->methods->count; m++) {
+                    AstNode *method_node = *(AstNode**)dynarray_get(impl_decl->methods, m);
+                    if (method_node->node_type != AST_FUNCTION_DECLARATION) continue;
+                    AstFunctionDeclaration *func = &method_node->data.function_declaration;
+                    if (func->intern_result == method_name) {
+                        return instantiate_generic_method(ctx, scope, gen_inst, method_node);
+                    }
+                }
+            }
+        }
+    }
+    
+    return NULL;
+}
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -284,24 +328,111 @@ Type* check_identifier(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     return sym->type;
 }
 
-static Type* underlying_type(Type *t) {
-    while (t && t->kind == TYPE_POINTER) {
-        t = t->as.ptr.base;
-    }
-    return t;
-}
 
 /**
  * Validates a function call expression, checking arguments against parameters.
  */
+static Symbol* resolve_overload_candidate(TypeCheckContext *ctx, AstNode *expr, Symbol *callee_sym, Type **arg_types, size_t arg_count, bool is_instance_method) {
+    size_t n_cands = callee_sym->overloads->count;
+    size_t alloc_cands = n_cands ? n_cands : 1;
+    Symbol **viable = arena_alloc(ctx->store->arena, sizeof(Symbol*) * alloc_cands);
+    int **mk = arena_alloc(ctx->store->arena, sizeof(int*) * alloc_cands);
+    size_t n_viable = 0;
+
+    size_t stride = arg_count ? arg_count : 1;
+    int *all_kinds = arena_alloc(ctx->store->arena, sizeof(int) * stride * alloc_cands);
+
+    for (size_t oi = 0; oi < n_cands; oi++) {
+        Symbol *cand = *(Symbol**)dynarray_get(callee_sym->overloads, oi);
+        Type *ft = cand->type;
+        if (!ft || ft->kind != TYPE_FUNCTION) continue;
+        
+        size_t param_start = 0;
+        size_t effective_param_count = ft->as.func.param_count;
+        
+        if (is_instance_method && ft->as.func.param_count > 0) {
+            param_start = 1;
+            effective_param_count--;
+        }
+
+        if (effective_param_count != arg_count) continue;
+
+        int *kinds = &all_kinds[oi * stride];
+        bool ok = true;
+        for (size_t p = 0; p < arg_count; p++) {
+            Type *pt = ft->as.func.params[param_start + p];
+            if (!pt) { ok = false; break; }
+            if (arg_types[p] == pt) {
+                kinds[p] = 2; // exact
+            } else if (type_can_implicit_cast(pt, arg_types[p])) {
+                kinds[p] = 1; // cast
+            } else {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) continue;
+
+        mk[n_viable] = kinds;
+        viable[n_viable] = cand;
+        n_viable++;
+    }
+
+    if (n_viable == 0) {
+        TypeError err = { .kind = TE_NO_MATCHING_OVERLOAD, .span = expr->span, .filename = ctx->filename };
+        err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
+        dynarray_push_value(ctx->errors, &err);
+        return NULL;
+    }
+
+    // Pass 3: Dominance Filter
+    bool *dominated = arena_alloc(ctx->store->arena, sizeof(bool) * n_viable);
+    memset(dominated, 0, sizeof(bool) * n_viable);
+
+    for (size_t a = 0; a < n_viable; a++) {
+        for (size_t b = 0; b < n_viable; b++) {
+            if (a == b || dominated[a]) continue;
+            bool b_dom_a = true, strictly = false;
+            for (size_t p = 0; p < arg_count; p++) {
+                if (mk[b][p] < mk[a][p]) { b_dom_a = false; break; }
+                if (mk[b][p] > mk[a][p])   strictly = true;
+            }
+            if (b_dom_a && strictly) dominated[a] = true;
+        }
+    }
+
+    Symbol *best = NULL;
+    size_t n_best = 0;
+    for (size_t i = 0; i < n_viable; i++) {
+        if (!dominated[i]) {
+            best = viable[i];
+            n_best++;
+        }
+    }
+
+    if (n_best > 1) {
+        TypeError err = { .kind = TE_AMBIGUOUS_OVERLOAD, .span = expr->span, .filename = ctx->filename };
+        err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
+        dynarray_push_value(ctx->errors, &err);
+        return NULL;
+    }
+    
+    return best;
+}
+
 Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     AstCallExpr *call = &expr->data.call_expr;
+    
+    AstNode *callee_base = call->callee;
+    if (callee_base->node_type == AST_GENERIC_INST_EXPR) {
+        callee_base = callee_base->data.generic_inst_expr.base;
+    }
     
     // =========================================================================
     // 1. INTRINSIC DISPATCH
     // =========================================================================
-    if (call->callee->node_type == AST_IDENTIFIER) {
-        Symbol *sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result, ctx->filename);
+    if (callee_base->node_type == AST_IDENTIFIER) {
+        Symbol *sym = scope_lookup_symbol(scope, callee_base->data.identifier.intern_result, ctx->filename);
         if (sym && sym->kind == SYMBOL_VALUE_INTRINSIC) {
             expr->type = ctx->store->t_void; 
             
@@ -311,8 +442,11 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
                 check_expression(ctx, scope, arg, NULL);
             }
 
-            call->callee->type = sym->type; 
-            call->callee->data.identifier.symbol = sym;
+            callee_base->type = sym->type; 
+            callee_base->data.identifier.symbol = sym;
+            if (call->callee != callee_base) {
+                call->callee->type = sym->type;
+            }
             return expr->type;
         }
     }
@@ -324,26 +458,21 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     Type   *callee_type = NULL;
     bool    is_instance_method = false;
 
-    if (call->callee->node_type == AST_IDENTIFIER) {
-        callee_sym = scope_lookup_symbol(scope, call->callee->data.identifier.intern_result, ctx->filename);
-    } else if (call->callee->node_type == AST_MEMBER_EXPR) {
-        AstMemberExpr *mem = &call->callee->data.member_expr;
+    if (callee_base->node_type == AST_IDENTIFIER) {
+        callee_sym = scope_lookup_symbol(scope, callee_base->data.identifier.intern_result, ctx->filename);
+    } else if (callee_base->node_type == AST_MEMBER_EXPR) {
+        AstMemberExpr *mem = &callee_base->data.member_expr;
         Type *target_type = check_expression(ctx, scope, mem->target, NULL);
         if (target_type) {
-            Type *underlying = underlying_type(target_type);
-
-            if (underlying->kind == TYPE_STRUCT) {
-                callee_sym = (Symbol*)hashmap_get(underlying->as.struct_type.methods, mem->member->key, ptr_hash, ptr_cmp);
-                
-                if (callee_sym) {
-                    // Instance method call detection:
-                    bool target_is_type = false;
-                    if (mem->target->node_type == AST_IDENTIFIER) {
-                        Symbol *s = mem->target->data.identifier.symbol;
-                        if (s && s->kind == SYMBOL_VALUE_TYPE) target_is_type = true;
-                    }
-                    is_instance_method = !target_is_type;
+            callee_sym = find_struct_method(ctx, scope, target_type, mem->member);
+            if (callee_sym) {
+                // Instance method call detection:
+                bool target_is_type = false;
+                if (mem->target->node_type == AST_IDENTIFIER) {
+                    Symbol *s = mem->target->data.identifier.symbol;
+                    if (s && s->kind == SYMBOL_VALUE_TYPE) target_is_type = true;
                 }
+                is_instance_method = !target_is_type;
             }
         }
     }
@@ -351,8 +480,8 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     if (!callee_sym) {
         // Fallback for non-overloadable expressions (like function pointers)
         callee_type = check_expression(ctx, scope, call->callee, NULL);
-        if (call->callee->node_type == AST_IDENTIFIER) callee_sym = call->callee->data.identifier.symbol;
-        else if (call->callee->node_type == AST_MEMBER_EXPR) callee_sym = call->callee->data.member_expr.symbol;
+        if (callee_base->node_type == AST_IDENTIFIER) callee_sym = callee_base->data.identifier.symbol;
+        else if (callee_base->node_type == AST_MEMBER_EXPR) callee_sym = callee_base->data.member_expr.symbol;
     }
 
     size_t arg_count = call->args ? call->args->count : 0;
@@ -362,96 +491,52 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
         size_t n_cands = callee_sym->overloads->count;
 
         // Pass 1: Type-check args
-        Type **arg_types = alloca(sizeof(Type*) * (arg_count ? arg_count : 1));
+        Type **arg_types = arena_alloc(ctx->store->arena, sizeof(Type*) * (arg_count ? arg_count : 1));
         for (size_t i = 0; i < arg_count; i++) {
             AstNode *arg = *(AstNode**)dynarray_get(call->args, i);
             arg_types[i] = check_expression(ctx, scope, arg, NULL);
             if (!arg_types[i]) return NULL;
         }
 
-        // Pass 2: Collect viable candidates
-        Symbol **viable = alloca(sizeof(Symbol*) * n_cands);
-        int **mk = alloca(sizeof(int*) * n_cands);
-        size_t n_viable = 0;
-
-        for (size_t oi = 0; oi < n_cands; oi++) {
-            Symbol *cand = *(Symbol**)dynarray_get(callee_sym->overloads, oi);
-            Type *ft = cand->type;
-            if (!ft || ft->kind != TYPE_FUNCTION) continue;
-            
-            size_t param_start = 0;
-            size_t effective_param_count = ft->as.func.param_count;
-            
-            if (is_instance_method && ft->as.func.param_count > 0) {
-                param_start = 1;
-                effective_param_count--;
-            }
-
-            if (effective_param_count != arg_count) continue;
-
-            int *kinds = alloca(sizeof(int) * (arg_count ? arg_count : 1));
-            bool ok = true;
-            for (size_t p = 0; p < arg_count; p++) {
-                Type *pt = ft->as.func.params[param_start + p];
-                if (!pt) { ok = false; break; }
-                if (arg_types[p] == pt) {
-                    kinds[p] = 2; // exact
-                } else if (type_can_implicit_cast(pt, arg_types[p])) {
-                    kinds[p] = 1; // cast
-                } else {
-                    ok = false;
-                    break;
-                }
-            }
-            if (!ok) continue;
-
-            mk[n_viable] = kinds;
-            viable[n_viable] = cand;
-            n_viable++;
-        }
-
-        if (n_viable == 0) {
-            TypeError err = { .kind = TE_NO_MATCHING_OVERLOAD, .span = expr->span, .filename = ctx->filename };
-            err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
-            dynarray_push_value(ctx->errors, &err);
-            return NULL;
-        }
-
-        // Pass 3: Dominance Filter
-        bool *dominated = alloca(sizeof(bool) * n_viable);
-        memset(dominated, 0, sizeof(bool) * n_viable);
-
-        for (size_t a = 0; a < n_viable; a++) {
-            for (size_t b = 0; b < n_viable; b++) {
-                if (a == b || dominated[a]) continue;
-                bool b_dom_a = true, strictly = false;
-                for (size_t p = 0; p < arg_count; p++) {
-                    if (mk[b][p] < mk[a][p]) { b_dom_a = false; break; }
-                    if (mk[b][p] > mk[a][p])   strictly = true;
-                }
-                if (b_dom_a && strictly) dominated[a] = true;
-            }
-        }
-
-        Symbol *best = NULL;
-        size_t n_best = 0;
-        for (size_t i = 0; i < n_viable; i++) {
-            if (!dominated[i]) {
-                best = viable[i];
-                n_best++;
-            }
-        }
-
-        if (n_best > 1) {
-            TypeError err = { .kind = TE_AMBIGUOUS_OVERLOAD, .span = expr->span, .filename = ctx->filename };
-            err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
-            dynarray_push_value(ctx->errors, &err);
-            return NULL;
-        }
-
-        callee_sym = best;
-        callee_type = best->type;
+        callee_sym = resolve_overload_candidate(ctx, expr, callee_sym, arg_types, arg_count, is_instance_method);
+        if (!callee_sym) return NULL;
+        callee_type = callee_sym->type;
     } else if (callee_sym) {
+        if (call->callee->node_type == AST_GENERIC_INST_EXPR) {
+            if (callee_sym->kind != SYMBOL_GENERIC_FUNCTION && callee_sym->kind != SYMBOL_GENERIC_STRUCT) {
+                printf("DEBUG: callee_sym->kind = %d, name = %s\n", callee_sym->kind, ((Slice*)callee_sym->name_rec->key)->ptr);
+                TypeError err = { .kind = TE_NOT_GENERIC, .span = call->callee->span, .filename = ctx->filename };
+                err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
+                dynarray_push_value(ctx->errors, &err);
+                return NULL;
+            }
+        }
+
+        if (callee_sym->kind == SYMBOL_GENERIC_FUNCTION || callee_sym->kind == SYMBOL_GENERIC_STRUCT) {
+            if (call->callee->node_type != AST_GENERIC_INST_EXPR) {
+                TypeError err = { .kind = TE_MISSING_TYPE_ARGS, .span = expr->span, .filename = ctx->filename };
+                err.as.name.name = ((Slice*)callee_sym->name_rec->key)->ptr;
+                dynarray_push_value(ctx->errors, &err);
+                return NULL;
+            }
+
+            AstGenericInstExpr *inst = &call->callee->data.generic_inst_expr;
+            size_t count = inst->type_args ? inst->type_args->count : 0;
+            Type **arg_types = NULL;
+            if (count > 0) {
+                arg_types = arena_alloc(ctx->store->arena, sizeof(Type*) * count);
+                for (size_t i = 0; i < count; i++) {
+                    AstNode *arg_node = *(AstNode**)dynarray_get(inst->type_args, i);
+                    arg_types[i] = resolve_ast_type(ctx, scope, arg_node);
+                    if (!arg_types[i]) return NULL;
+                }
+            }
+            
+            Symbol *inst_sym = instantiate_generic_function(ctx, scope, callee_sym, arg_types, count, call->callee->span);
+            if (!inst_sym) return NULL;
+            
+            callee_sym = inst_sym;
+        }
         callee_type = callee_sym->type;
     }
 
@@ -464,19 +549,22 @@ Type* check_call_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     }
 
     // Bind specific symbol and type to callee node
-    if (call->callee->node_type == AST_IDENTIFIER) {
-        call->callee->data.identifier.symbol = callee_sym;
-        call->callee->type = callee_type;
-    } else if (call->callee->node_type == AST_MEMBER_EXPR) {
-        call->callee->data.member_expr.symbol = callee_sym;
+    if (callee_base->node_type == AST_IDENTIFIER) {
+        callee_base->data.identifier.symbol = callee_sym;
+        callee_base->type = callee_type;
+    } else if (callee_base->node_type == AST_MEMBER_EXPR) {
+        callee_base->data.member_expr.symbol = callee_sym;
+        callee_base->type = callee_type;
+    }
+    if (call->callee != callee_base) {
         call->callee->type = callee_type;
     }
 
     // =========================================================================
     // 3. METHOD SELF INJECTION
     // =========================================================================
-    if (is_instance_method && call->callee->node_type == AST_MEMBER_EXPR) {
-        AstMemberExpr *mem = &call->callee->data.member_expr;
+    if (is_instance_method && callee_base->node_type == AST_MEMBER_EXPR) {
+        AstMemberExpr *mem = &callee_base->data.member_expr;
         
         // If not already injected, perform self-injection
         if (!mem->self_injected && mem->target->type && callee_type->as.func.param_count > 0) {
@@ -945,15 +1033,14 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
     if (t->kind == TYPE_POINTER) t = t->as.ptr.base;
 
     if (t->kind != TYPE_STRUCT) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename };
-        err.as.mismatch.expected = ctx->store->t_void; // Placeholder for struct
-        err.as.mismatch.actual = alloc_ty;
+        TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename };
+        err.as.name.name = "Allocator argument must be a struct type";
         dynarray_push_value(ctx->errors, &err);
         return;
     }
 
     if (t->as.struct_type.field_count != 3) {
-        TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename, 
+        TypeError err = { .kind = TE_ALLOCATOR_SHAPE_INVALID, .span = alloc_arg->span, .filename = ctx->filename, 
                           .as.name.name = "Allocator struct must have exactly 3 fields: ctx, _alloc, _free" };
         dynarray_push_value(ctx->errors, &err);
         return;
@@ -963,14 +1050,14 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
     for (int i = 0; i < 3; i++) {
         StructField *field = &t->as.struct_type.fields[i];
         if (!field->name || !field->name->key) {
-             TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename,
+             TypeError err = { .kind = TE_ALLOCATOR_SHAPE_INVALID, .span = alloc_arg->span, .filename = ctx->filename,
                               .as.name.name = "Allocator struct fields must have names" };
             dynarray_push_value(ctx->errors, &err);
             return;
         }
         Slice *field_name = (Slice*)field->name->key;
         if (strncmp(field_name->ptr, expected_fields[i], field_name->len) != 0 || expected_fields[i][field_name->len] != '\0') {
-            TypeError err = { .kind = TE_INCOMPLETE_TYPE, .span = alloc_arg->span, .filename = ctx->filename,
+            TypeError err = { .kind = TE_ALLOCATOR_SHAPE_INVALID, .span = alloc_arg->span, .filename = ctx->filename,
                               .as.name.name = "Allocator struct fields must be named: ctx, _alloc, _free" };
             dynarray_push_value(ctx->errors, &err);
             return;
@@ -982,14 +1069,14 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
     StructField *free_field = &t->as.struct_type.fields[2];
 
     if (!ctx_field->type || ctx_field->type->kind != TYPE_POINTER) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field 'ctx' must be a pointer" };
+        TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "field 'ctx' must be a pointer" };
         dynarray_push_value(ctx->errors, &err);
     }
     
     if (!alloc_field->type || alloc_field->type->kind != TYPE_FUNCTION) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field '_alloc' must be a function" };
+        TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "field '_alloc' must be a function" };
         dynarray_push_value(ctx->errors, &err);
     } else {
         Type *fn_ty = alloc_field->type;
@@ -997,15 +1084,15 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
             fn_ty->as.func.params[0]->kind != TYPE_POINTER ||
             (fn_ty->as.func.params[1]->kind != TYPE_PRIMITIVE || fn_ty->as.func.params[1]->as.primitive != PRIM_I64) ||
             fn_ty->as.func.return_type->kind != TYPE_POINTER) {
-            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                              .as.name.name = "Allocator field '_alloc' must have signature: fn(ptr, i64) -> ptr" };
+            TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename, 
+                              .as.name.name = "field '_alloc' must have signature: fn(ptr, i64) -> ptr" };
             dynarray_push_value(ctx->errors, &err);
         }
     }
 
     if (!free_field->type || free_field->type->kind != TYPE_FUNCTION) {
-        TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                          .as.name.name = "Allocator field '_free' must be a function" };
+        TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename, 
+                          .as.name.name = "field '_free' must be a function" };
         dynarray_push_value(ctx->errors, &err);
     } else {
         Type *fn_ty = free_field->type;
@@ -1013,8 +1100,8 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
             fn_ty->as.func.params[0]->kind != TYPE_POINTER ||
             fn_ty->as.func.params[1]->kind != TYPE_POINTER ||
             !type_is_void(fn_ty->as.func.return_type)) {
-            TypeError err = { .kind = TE_TYPE_MISMATCH, .span = alloc_arg->span, .filename = ctx->filename, 
-                              .as.name.name = "Allocator field '_free' must have signature: fn(ptr, ptr) -> void" };
+            TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename, 
+                              .as.name.name = "field '_free' must have signature: fn(ptr, ptr) -> void" };
             dynarray_push_value(ctx->errors, &err);
         }
     }
@@ -1306,8 +1393,16 @@ static Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *exp
     if (!target_type) return NULL;
 
     Type *underlying = target_type;
-    if (underlying->kind == TYPE_POINTER) {
-        underlying = underlying->as.ptr.base;
+    while (underlying && (underlying->kind == TYPE_POINTER || underlying->kind == TYPE_GENERIC_INST)) {
+        if (underlying->kind == TYPE_POINTER) {
+            underlying = underlying->as.ptr.base;
+        } else {
+            underlying = underlying->as.generic_inst.concrete_type;
+        }
+    }
+
+    if (!underlying) {
+        return NULL;
     }
 
     // 3. Dispatch based on the type we are accessing
@@ -1362,7 +1457,7 @@ static Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *exp
             }
             
             // 2. Find the method
-            Symbol *method_sym = hashmap_get(underlying->as.struct_type.methods, member_expr->member->key, ptr_hash, ptr_cmp);
+            Symbol *method_sym = find_struct_method(ctx, scope, target_type, member_expr->member);
             if (method_sym) {
                 member_expr->symbol = method_sym;
                 
@@ -1434,6 +1529,40 @@ static Type* check_cast(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
     return cast->target_type;
 }
 
+static Type* check_generic_inst_expr(TypeCheckContext *ctx, Scope *scope, AstNode *expr) {
+    AstGenericInstExpr *inst = &expr->data.generic_inst_expr;
+    
+    size_t count = inst->type_args ? inst->type_args->count : 0;
+    Type **arg_types = NULL;
+    if (count > 0) {
+        arg_types = arena_alloc(ctx->store->arena, count * sizeof(Type*));
+        for (size_t i = 0; i < count; i++) {
+            AstNode *arg_node = *(AstNode**)dynarray_get(inst->type_args, i);
+            arg_types[i] = resolve_ast_type(ctx, scope, arg_node);
+        }
+    }
+
+    if (inst->base->node_type == AST_IDENTIFIER) {
+        Symbol *sym = scope_lookup_symbol(scope, inst->base->data.identifier.intern_result, inst->base->filename);
+        if (sym && sym->kind == SYMBOL_GENERIC_FUNCTION) {
+            Symbol *inst_sym = instantiate_generic_function(ctx, scope, sym, arg_types, count, expr->span);
+            if (inst_sym) {
+                expr->type = inst_sym->type;
+                inst->base->data.identifier.symbol = inst_sym;
+                inst->base->type = inst_sym->type;
+                return inst_sym->type;
+            }
+            return NULL;
+        }
+    }
+
+    Type *base_type = check_expression(ctx, scope, inst->base, NULL);
+    if (!base_type) return NULL;
+
+    expr->type = base_type;
+    return base_type;
+}
+
 Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *expected_type) {
     if (!expr) return NULL;
     
@@ -1450,6 +1579,9 @@ Type* check_expression(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type 
             break;
         case AST_CALL_EXPR:
             result_type = check_call_expr(ctx, scope, expr);
+            break;
+        case AST_GENERIC_INST_EXPR:
+            result_type = check_generic_inst_expr(ctx, scope, expr);
             break;
         case AST_SUBSCRIPT_EXPR:
             result_type = check_subscript(ctx, scope, expr, expected_type);

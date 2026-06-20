@@ -11,6 +11,10 @@ typedef enum {
     TE_UNKNOWN_TYPE,       
     TE_REDECLARATION,      
     TE_UNDECLARED,         
+    TE_VOID_PARAMETER,
+    TE_VOID_VARIABLE,
+    TE_NOT_GENERIC,
+    TE_INVALID_ALLOCATOR,
     TE_INCOMPLETE_TYPE,    // Variable declared with incomplete type (e.g. missing array size)
     TE_EXPECTED_TYPE_ARG,  // Expected a type argument (e.g., for @alloc)
     
@@ -43,7 +47,11 @@ typedef enum {
     TE_NOT_LVALUE,
     TE_RECURSIVE_CONST,
     TE_AMBIGUOUS_OVERLOAD,
-    TE_NO_MATCHING_OVERLOAD
+    TE_NO_MATCHING_OVERLOAD,
+    TE_MISSING_TYPE_ARGS,
+    TE_GENERIC_ARG_MISMATCH,
+    TE_ALLOCATOR_SHAPE_INVALID,
+    TE_INSTANTIATION_DEPTH
 } TypeErrorKind;
 
 typedef struct {
@@ -58,8 +66,13 @@ typedef struct {
             Type *expected;
             Type *actual;
         } mismatch;
-
-        // TE_DIMENSION_MISMATCH
+        
+        struct {
+            const char *name;
+            size_t expected;
+            size_t provided;
+        } generic_mismatch;
+        
         struct {
             int expected_ndim;
             int actual_ndim;

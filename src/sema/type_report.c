@@ -56,6 +56,29 @@ void print_type_error(TypeError *err) {
         case TE_UNKNOWN_TYPE:
             fprintf(stderr, "Unknown type '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
             break;
+        case TE_VOID_PARAMETER:
+            fprintf(stderr, "Parameter cannot have type 'void'.\n");
+            break;
+        case TE_VOID_VARIABLE:
+            fprintf(stderr, "Variable cannot have type 'void'.\n");
+            break;
+        case TE_NOT_GENERIC:
+            fprintf(stderr, "Type arguments provided for non-generic symbol '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            break;
+        case TE_INVALID_ALLOCATOR:
+            fprintf(stderr, "Invalid allocator: %s.\n", err->as.name.name);
+            break;
+        case TE_GENERIC_ARG_MISMATCH:
+            fprintf(stderr, "Generic argument mismatch for '%s%s%s'. Expected %zu arguments, but provided %zu.\n", 
+                    COL_YELLOW, err->as.generic_mismatch.name, COL_RESET, 
+                    err->as.generic_mismatch.expected, err->as.generic_mismatch.provided);
+            break;
+        case TE_ALLOCATOR_SHAPE_INVALID:
+            fprintf(stderr, "Invalid allocator shape: %s%s%s\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            break;
+        case TE_INSTANTIATION_DEPTH:
+            fprintf(stderr, "Maximum generic instantiation depth exceeded for '%s%s%s'. Possible infinite recursion.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            break;
         case TE_INCOMPLETE_TYPE:
              fprintf(stderr, "Incomplete type: '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
              break;
@@ -164,10 +187,13 @@ void print_type_error(TypeError *err) {
             fprintf(stderr, "Recursive constant definition detected (cycle).\n");
             break;
         case TE_AMBIGUOUS_OVERLOAD:
-            fprintf(stderr, "Ambiguous call to overloaded function '%s%s%s'. Multiple undominated candidates remain.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            fprintf(stderr, "Ambiguous call to overloaded function '%s%s%s'. Multiple viable candidates found.\n", COL_YELLOW, err->as.name.name, COL_RESET);
             break;
         case TE_NO_MATCHING_OVERLOAD:
-            fprintf(stderr, "No matching overload found for function '%s%s%s' with the given arguments.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            fprintf(stderr, "No matching overload found for call to '%s%s%s'.\n", COL_YELLOW, err->as.name.name, COL_RESET);
+            break;
+        case TE_MISSING_TYPE_ARGS:
+            fprintf(stderr, "Generic template '%s%s%s' requires explicit type arguments (e.g. %s%s<T>%s).\n", COL_YELLOW, err->as.name.name, COL_RESET, COL_YELLOW, err->as.name.name, COL_RESET);
             break;
         default:
             fprintf(stderr, "Unknown Semantic Error.\n");

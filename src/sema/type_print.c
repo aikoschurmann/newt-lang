@@ -84,6 +84,21 @@ static void type_print_internal(FILE *out, const Type *type) {
             fprintf(out, ") -> ");
             type_print_internal(out, type->as.func.return_type);
             break;
+        case TYPE_TYPEVAR:
+            if (type->as.typevar.name && type->as.typevar.name->key) {
+                Slice *s = (Slice*)type->as.typevar.name->key;
+                fprintf(out, "%.*s", (int)s->len, s->ptr);
+            } else fprintf(out, "?");
+            break;
+        case TYPE_GENERIC_INST:
+            type_print_internal(out, type->as.generic_inst.base);
+            fprintf(out, "[");
+            for (size_t i = 0; i < type->as.generic_inst.arg_count; i++) {
+                if (i > 0) fprintf(out, ", ");
+                type_print_internal(out, type->as.generic_inst.args[i]);
+            }
+            fprintf(out, "]");
+            break;
         default: break;
     }
 }
@@ -110,6 +125,8 @@ static const char* get_kind_name(const Type *type) {
         case TYPE_STRUCT:    return "Struct";
         case TYPE_FUNCTION:  return "Function";
         case TYPE_ENUM:      return "Enum";
+        case TYPE_TYPEVAR:     return "TypeVar";
+        case TYPE_GENERIC_INST:return "GenericInst";
         default:             return "Unknown";
     }
 }
@@ -125,6 +142,8 @@ static const char* get_kind_color(const Type *type) {
         case TYPE_STRUCT:    return COL_KIND_STRUCT;
         case TYPE_FUNCTION:  return COL_KIND_FUNCTION;
         case TYPE_ENUM:      return COL_KIND_OTHER;
+        case TYPE_TYPEVAR:     return COL_KIND_OTHER;
+        case TYPE_GENERIC_INST:return COL_KIND_STRUCT;
         default:             return COL_KIND_OTHER;
     }
 }
@@ -138,6 +157,8 @@ static const char* symbol_kind_to_str(SymbolValue kind) {
         case SYMBOL_VALUE_MODULE:   return "Module";
         case SYMBOL_VALUE_NAMESPACE:return "Namespace";
         case SYMBOL_VALUE_INTRINSIC:return "Intrinsic";
+        case SYMBOL_GENERIC_FUNCTION: return "GenericFunction";
+        case SYMBOL_GENERIC_STRUCT:   return "GenericStruct";
         default:                    return "Unknown";
     }
 }

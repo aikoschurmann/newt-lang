@@ -64,6 +64,19 @@ static size_t type_hasher(void *ptr) {
             }
             break;
 
+        case TYPE_TYPEVAR:
+            h = hash_combine(h, (size_t)(uintptr_t)type->as.typevar.name);
+            h = hash_combine(h, (size_t)type->as.typevar.index);
+            break;
+
+        case TYPE_GENERIC_INST:
+            h = hash_combine(h, type->as.generic_inst.base->cached_hash);
+            h = hash_combine(h, (size_t)type->as.generic_inst.arg_count);
+            for (size_t i = 0; i < type->as.generic_inst.arg_count; i++) {
+                h = hash_combine(h, type->as.generic_inst.args[i]->cached_hash);
+            }
+            break;
+
         default:
             break;
     }
@@ -130,6 +143,19 @@ static int type_comparator(void *a, void *b) {
         // Future: Structs
         // case TYPE_STRUCT: return (ta->as.structure.name == tb->as.structure.name) ? 0 : 1;
 
+        case TYPE_TYPEVAR:
+            if (ta->as.typevar.name != tb->as.typevar.name) return 1;
+            return (ta->as.typevar.index == tb->as.typevar.index) ? 0 : 1;
+
+        case TYPE_GENERIC_INST:
+            if (ta->as.generic_inst.base != tb->as.generic_inst.base) return 1;
+            if (ta->as.generic_inst.arg_count != tb->as.generic_inst.arg_count) return 1;
+            if (ta->as.generic_inst.arg_count > 0) {
+                return memcmp(ta->as.generic_inst.args, tb->as.generic_inst.args,
+                              ta->as.generic_inst.arg_count * sizeof(Type*));
+            }
+            return 0;
+
         default:
             return 1; // Not equal
     }
@@ -161,6 +187,15 @@ static void *type_copy_func(Arena *arena, const void *data, size_t len) {
         if (new_params) {
             memcpy(new_params, src->as.func.params, params_size);
             copy->as.func.params = new_params;
+        }
+    }
+
+    if (src->kind == TYPE_GENERIC_INST && src->as.generic_inst.arg_count > 0) {
+        size_t args_size = sizeof(Type*) * src->as.generic_inst.arg_count;
+        Type **new_args = arena_alloc(arena, args_size);
+        if (new_args) {
+            memcpy(new_args, src->as.generic_inst.args, args_size);
+            copy->as.generic_inst.args = new_args;
         }
     }
     
@@ -244,6 +279,8 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
     if (!ts->type_interner) return NULL;
 
     ts->primitive_registry = hashmap_create(arena, 64);
+    ts->generic_inst_cache = hashmap_create(arena, 32);
+    ts->impl_registry = hashmap_create(arena, 32);
 
     // Create canonical primitives
     ts->t_i8  = create_primitive(ts, PRIM_I8);
@@ -305,10 +342,10 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
     return ts;
 }
 
-void register_intrinsics(TypeStore *ts, Scope *global_scope, DenseArenaInterner *ids) {
+void register_intrinsics(TypeStore *ts, Scope *global_scope, DenseArenaInterner *identifiers) {
     // 1. print(...)
     Slice print_slice = { .ptr = "print", .len = 5 };
-    InternResult *print_res = intern(ids, &print_slice, NULL);
+    InternResult *print_res = intern(identifiers, &print_slice, NULL);
     Symbol *print_sym = scope_define_symbol(global_scope, print_res, ts->t_void, SYMBOL_VALUE_INTRINSIC, "<builtin>", true, NULL);
     if (print_sym) {
         print_sym->intrinsic_kind = INTRINSIC_PRINT;
@@ -316,10 +353,205 @@ void register_intrinsics(TypeStore *ts, Scope *global_scope, DenseArenaInterner 
 
     // 2. println(...)
     Slice println_slice = { .ptr = "println", .len = 7 };
-    InternResult *println_res = intern(ids, &println_slice, NULL);
+    InternResult *println_res = intern(identifiers, &println_slice, NULL);
     Symbol *println_sym = scope_define_symbol(global_scope, println_res, ts->t_void, SYMBOL_VALUE_INTRINSIC, "<builtin>", true, NULL);
     if (println_sym) {
         println_sym->intrinsic_kind = INTRINSIC_PRINT_NEWLINE;
+    }
+}
+
+void register_primitives_to_scope(TypeStore *ts, Scope *universe_scope, DenseArenaInterner *keywords) {
+    // 3. Register primitive types as symbols so they can be aliased and looked up
+    const char* prims[] = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "str", "void"};
+    Type* ptypes[] = {ts->t_i8, ts->t_i16, ts->t_i32, ts->t_i64, ts->t_u8, ts->t_u16, ts->t_u32, ts->t_u64, ts->t_f32, ts->t_f64, ts->t_bool, ts->t_char, ts->t_str, ts->t_void};
+    for (int i = 0; i < 14; i++) {
+        Slice s = { .ptr = (char*)prims[i], .len = strlen(prims[i]) };
+        InternResult *res = intern(keywords, &s, NULL);
+        scope_define_symbol(universe_scope, res, ptypes[i], SYMBOL_VALUE_TYPE, "<builtin>", true, NULL);
+    }
+}
+
+// --- Type construction helpers ---
+
+Type *make_pointer_type(TypeStore *ts, Type *base) {
+    if (!ts || !base) return NULL;
+    Type proto = { .kind = TYPE_POINTER, .as.ptr.base = base };
+    InternResult *res = intern_type(ts, &proto);
+    if (!res) return NULL;
+    return (Type*)((Slice*)res->key)->ptr;
+}
+
+Type *make_array_type(TypeStore *ts, Type *base, int64_t size) {
+    if (!ts || !base) return NULL;
+    Type proto = { .kind = TYPE_ARRAY, .as.array = { .base = base, .size = size } };
+    InternResult *res = intern_type(ts, &proto);
+    if (!res) return NULL;
+    return (Type*)((Slice*)res->key)->ptr;
+}
+
+Type *make_slice_type(TypeStore *ts, Type *base) {
+    if (!ts || !base) return NULL;
+    Type proto = { .kind = TYPE_SLICE, .as.slice.base = base };
+    InternResult *res = intern_type(ts, &proto);
+    if (!res) return NULL;
+    return (Type*)((Slice*)res->key)->ptr;
+}
+
+Type *make_function_type(TypeStore *ts, Type *return_type, Type **params, size_t param_count) {
+    if (!ts || !return_type) return NULL;
+    Type proto = { .kind = TYPE_FUNCTION, .as.func = { .return_type = return_type, .params = params, .param_count = param_count } };
+    InternResult *res = intern_type(ts, &proto);
+    if (!res) return NULL;
+    return (Type*)((Slice*)res->key)->ptr;
+}
+
+// --- Generic caching infrastructure ---
+
+typedef struct {
+    Type *base;
+    size_t arg_count;
+    Type **args;
+} MonoKey;
+
+static size_t mono_key_hash(void *ptr) {
+    MonoKey *key = (MonoKey*)ptr;
+    size_t h = hash_combine(0, (size_t)(uintptr_t)key->base);
+    h = hash_combine(h, key->arg_count);
+    for (size_t i = 0; i < key->arg_count; i++) {
+        h = hash_combine(h, (size_t)(uintptr_t)key->args[i]);
+    }
+    return h;
+}
+
+static int mono_key_cmp(void *a, void *b) {
+    MonoKey *ka = (MonoKey*)a;
+    MonoKey *kb = (MonoKey*)b;
+    if (ka->base != kb->base) return 1;
+    if (ka->arg_count != kb->arg_count) return 1;
+    for (size_t i = 0; i < ka->arg_count; i++) {
+        if (ka->args[i] != kb->args[i]) return 1;
+    }
+    return 0; // equal
+}
+
+Type *make_generic_inst_type(TypeStore *ts, Type *base, Type **args, size_t arg_count) {
+    if (!ts || !base) return NULL;
+
+    // Check the cache first
+    MonoKey lookup_key = { .base = base, .args = args, .arg_count = arg_count };
+    Type *cached = (Type*)hashmap_get(ts->generic_inst_cache, &lookup_key, mono_key_hash, mono_key_cmp);
+    if (cached) return cached;
+
+    // Build the TYPE_GENERIC_INST proto type
+    Type proto = {0};
+    proto.kind = TYPE_GENERIC_INST;
+    proto.as.generic_inst.base = base;
+    proto.as.generic_inst.args = args;
+    proto.as.generic_inst.arg_count = arg_count;
+    proto.as.generic_inst.concrete_type = NULL;
+
+    InternResult *res = intern_type(ts, &proto);
+    if (!res) return NULL;
+
+    Type *inst_type = (Type*)((Slice*)res->key)->ptr;
+
+    // Insert into cache
+    MonoKey *persistent_key = arena_alloc(ts->arena, sizeof(MonoKey));
+    persistent_key->base = base;
+    persistent_key->arg_count = arg_count;
+    persistent_key->args = arena_alloc(ts->arena, sizeof(Type*) * arg_count);
+    memcpy(persistent_key->args, args, sizeof(Type*) * arg_count);
+
+    inst_type->as.generic_inst.args = persistent_key->args;
+
+    hashmap_put(ts->generic_inst_cache, persistent_key, inst_type, mono_key_hash, mono_key_cmp);
+
+    return inst_type;
+}
+
+// --- Generic type substitution ---
+
+Type *type_substitute(TypeStore *ts, Type *t, HashMap *bindings) {
+    if (!t || !bindings) return t;
+
+    switch (t->kind) {
+        case TYPE_TYPEVAR: {
+            Type *bound = hashmap_get(bindings, t->as.typevar.name->key, ptr_hash, ptr_cmp);
+            return bound ? bound : t;
+        }
+
+        case TYPE_POINTER: {
+            Type *sub_base = type_substitute(ts, t->as.ptr.base, bindings);
+            if (sub_base == t->as.ptr.base) return t;
+            return make_pointer_type(ts, sub_base);
+        }
+
+        case TYPE_ARRAY: {
+            Type *sub_base = type_substitute(ts, t->as.array.base, bindings);
+            if (sub_base == t->as.array.base) return t;
+            return make_array_type(ts, sub_base, t->as.array.size);
+        }
+
+        case TYPE_SLICE: {
+            Type *sub_base = type_substitute(ts, t->as.slice.base, bindings);
+            if (sub_base == t->as.slice.base) return t;
+            return make_slice_type(ts, sub_base);
+        }
+
+        case TYPE_FUNCTION: {
+            Type *sub_ret = type_substitute(ts, t->as.func.return_type, bindings);
+            bool changed = (sub_ret != t->as.func.return_type);
+
+            Type **sub_params = NULL;
+            if (t->as.func.param_count > 0) {
+                for (size_t i = 0; i < t->as.func.param_count; i++) {
+                    Type *subbed = type_substitute(ts, t->as.func.params[i], bindings);
+                    if (subbed != t->as.func.params[i]) {
+                        if (!changed && !sub_params) {
+                            sub_params = arena_alloc(ts->arena, sizeof(Type*) * t->as.func.param_count);
+                            for (size_t j = 0; j < i; j++) sub_params[j] = t->as.func.params[j];
+                        }
+                        changed = true;
+                    }
+                    if (sub_params) sub_params[i] = subbed;
+                }
+            }
+
+            if (!changed) return t;
+            return make_function_type(ts, sub_ret, sub_params ? sub_params : t->as.func.params, t->as.func.param_count);
+        }
+
+        case TYPE_GENERIC_INST: {
+            bool changed = false;
+            Type **sub_args = NULL;
+            if (t->as.generic_inst.arg_count > 0) {
+                for (size_t i = 0; i < t->as.generic_inst.arg_count; i++) {
+                    Type *subbed = type_substitute(ts, t->as.generic_inst.args[i], bindings);
+                    if (subbed != t->as.generic_inst.args[i]) {
+                        if (!changed && !sub_args) {
+                            sub_args = arena_alloc(ts->arena, sizeof(Type*) * t->as.generic_inst.arg_count);
+                            for (size_t j = 0; j < i; j++) sub_args[j] = t->as.generic_inst.args[j];
+                        }
+                        changed = true;
+                    }
+                    if (sub_args) sub_args[i] = subbed;
+                }
+            }
+
+            Type *sub_concrete = t->as.generic_inst.concrete_type ? type_substitute(ts, t->as.generic_inst.concrete_type, bindings) : NULL;
+            if (sub_concrete != t->as.generic_inst.concrete_type) changed = true;
+
+            if (!changed) return t;
+
+            Type *new_inst = make_generic_inst_type(ts, t->as.generic_inst.base, sub_args ? sub_args : t->as.generic_inst.args, t->as.generic_inst.arg_count);
+            if (new_inst) {
+                new_inst->as.generic_inst.concrete_type = sub_concrete;
+            }
+            return new_inst;
+        }
+
+        default:
+            return t;
     }
 }
 
