@@ -4,11 +4,11 @@ import std.mem;
 // The buffer is owned by the caller; FixedArena does not free it.
 pub struct FixedArena {
     buffer: *char;
-    capacity: i64;
-    offset: i64;
+    capacity: usize;
+    offset: usize;
 }
 
-fn fixed_arena_alloc_impl(ctx: *void, size: i64) -> *void {
+fn fixed_arena_alloc_impl(ctx: *void, size: usize) -> *void {
     arena: *FixedArena = ctx as *FixedArena;
     return arena.alloc(size);
 }
@@ -16,7 +16,7 @@ fn fixed_arena_alloc_impl(ctx: *void, size: i64) -> *void {
 fn fixed_arena_free_impl(_ctx: *void, _ptr: *void) -> void {}
 
 impl FixedArena {
-    pub fn new(buffer: *char, capacity: i64) -> FixedArena {
+    pub fn new(buffer: *char, capacity: usize) -> FixedArena {
         return FixedArena {
             buffer: buffer,
             capacity: capacity,
@@ -24,16 +24,16 @@ impl FixedArena {
         };
     }
 
-    pub fn alloc(self: *FixedArena, size: i64) -> *void {
+    pub fn alloc(self: *FixedArena, size: usize) -> *void {
         if (self.offset + size) > self.capacity {
             return null;
         }
-        ptr: *void = ((self.buffer as i64) + self.offset) as *void;
+        ptr: *void = ((self.buffer as usize) + self.offset) as *void;
         self.offset = self.offset + size;
         return ptr;
     }
 
-    pub fn remaining(self: *FixedArena) -> i64 {
+    pub fn remaining(self: *FixedArena) -> usize {
         return self.capacity - self.offset;
     }
 

@@ -1,15 +1,15 @@
 pub struct Allocator {
     ctx: *void;
-    _alloc: fn(*void, i64) -> *void;
+    _alloc: fn(*void, usize) -> *void;
     _free: fn(*void, *void) -> void;
 }
 
 impl Allocator {
-    pub fn alloc(self: *Allocator, size: i64) -> *void {
+    pub fn alloc(self: *Allocator, size: usize) -> *void {
         return self._alloc(self.ctx, size);
     }
 
-    pub fn alloc(self: *Allocator, count: i64, size: i64) -> *void {
+    pub fn alloc(self: *Allocator, count: usize, size: usize) -> *void {
         return self.alloc(count * size);
     }
 
@@ -19,7 +19,7 @@ impl Allocator {
 
     pub fn clone<T>(self: *Allocator, src: T[]) -> T[] {
         dest: T[] = @alloc(T, self, src.len);
-        for (i: i64 = 0; i < src.len; i += 1) { dest[i] = src[i]; }
+        for (i: usize = 0; i < src.len; i += 1) { dest[i] = src[i]; }
         return dest;
     }
 }

@@ -3,7 +3,7 @@ import std.libc;
 // A non-owning view into a string.  Does not null-terminate on its own.
 pub struct Str {
     ptr: *char;
-    len: i64;
+    len: usize;
 }
 
 impl Str {
@@ -28,9 +28,9 @@ impl Str {
     }
 
     // Return a sub-view [start, start+len).  No bounds check — caller's responsibility.
-    pub fn slice(self: *Str, start: i64, len: i64) -> Str {
+    pub fn slice(self: *Str, start: usize, len: usize) -> Str {
         return Str {
-            ptr: (self.ptr as i64 + start) as *char,
+            ptr: (self.ptr as usize + start) as *char,
             len: len
         };
     }

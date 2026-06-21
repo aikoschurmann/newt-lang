@@ -10,6 +10,6 @@ SEMA_ERROR("comp_mismatch", "fn main() { x: i32 = 1; y: f32 = 1.0; a: bool = x <
 SEMA_ERROR("comp_struct", "struct S { x: i32; } fn main() { s1: S; s2: S; a: bool = s1 == s2; }", TE_BINOP_MISMATCH)
 
 // Array/Slice Length
-SEMA_VALID("array_len", "fn main() { arr: i32[10]; x: i64 = arr.len; }")
-SEMA_VALID("slice_len", "fn f(s: i32[]) { x: i64 = s.len; } fn main() {}")
-SEMA_ERROR("len_on_int", "fn main() { x: i32 = 10; y: i64 = x.len; }", TE_FIELD_ACCESS)
+SEMA_VALID("array_len", "fn main() { arr: i32[10]; x: usize = arr.len; }")
+SEMA_VALID("slice_len", "fn f(s: i32[]) { x: usize = s.len; } fn main() {}")
+SEMA_ERROR("len_on_int", "fn main() { x: i32 = 10; y: usize = x.len; }", TE_FIELD_ACCESS)

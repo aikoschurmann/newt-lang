@@ -40,6 +40,8 @@ static void print_primitive_kind(FILE *out, PrimitiveKind kind) {
         [PRIM_F64]  = "f64",
         [PRIM_BOOL] = "bool",
         [PRIM_CHAR] = "char",
+        [PRIM_USIZE] = "usize",
+        [PRIM_ISIZE] = "isize",
     };
 
     if (kind >= 0 && kind < (PrimitiveKind)(sizeof(primitive_names) / sizeof(primitive_names[0]))) {

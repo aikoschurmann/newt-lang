@@ -3,8 +3,8 @@ import .mem;
 
 pub struct Vec<T> {
     data: *T;
-    len: i64;
-    cap: i64;
+    len: usize;
+    cap: usize;
     allocator: *mem.Allocator;
 }
 
@@ -16,7 +16,7 @@ impl<T> Vec<T> {
         self.allocator = allocator;
     }
 
-    pub fn with_capacity(self: *Vec<T>, allocator: *mem.Allocator, capacity: i64) -> void {
+    pub fn with_capacity(self: *Vec<T>, allocator: *mem.Allocator, capacity: usize) -> void {
         self.data = null as *T;
         if (capacity > 0) {
             self.data = @alloc(T, allocator, capacity);
@@ -37,7 +37,7 @@ impl<T> Vec<T> {
 
     pub fn push(self: *Vec<T>, item: T) -> void {
         if (self.len >= self.cap) {
-            new_cap: i64 = self.cap * 2;
+            new_cap: usize = self.cap * 2;
             if (new_cap == 0) {
                 new_cap = 8;
             }
@@ -45,7 +45,7 @@ impl<T> Vec<T> {
             new_data: *T = @alloc(T, self.allocator, new_cap);
             if (self.cap > 0) {
                 // Copy existing data
-                i: i64 = 0;
+                i: usize = 0;
                 while (i < self.len) {
                     new_data[i] = self.data[i];
                     i = i + 1;
@@ -67,15 +67,15 @@ impl<T> Vec<T> {
         return self.data[self.len];
     }
     
-    pub fn get(self: *Vec<T>, index: i64) -> T {
+    pub fn get(self: *Vec<T>, index: usize) -> T {
         return self.data[index];
     }
 
-    pub fn get_ptr(self: *Vec<T>, index: i64) -> *T {
+    pub fn get_ptr(self: *Vec<T>, index: usize) -> *T {
         return self.data + index;
     }
 
-    pub fn set(self: *Vec<T>, index: i64, value: T) -> void {
+    pub fn set(self: *Vec<T>, index: usize, value: T) -> void {
         self.data[index] = value;
     }
     

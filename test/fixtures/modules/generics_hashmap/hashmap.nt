@@ -8,16 +8,16 @@ pub struct MapEntry<K, V> {
 
 pub struct HashMap<K, V> {
     entries: *MapEntry<K, V>;
-    size: i32;
-    capacity: i32;
+    size: usize;
+    capacity: usize;
 }
 
 impl<K, V> HashMap<K, V> {
-    pub fn init(self: *HashMap<K, V>, cap: i32) {
+    pub fn init(self: *HashMap<K, V>, cap: usize) {
         self.capacity = cap;
         self.size = 0;
-        self.entries = @alloc(MapEntry<K, V>, std.heap.allocator, cap as i64);
-        for (i: i32 = 0; i < cap; i = i + 1) {
+        self.entries = @alloc(MapEntry<K, V>, std.heap.allocator, cap);
+        for (i: usize = 0; i < cap; i = i + 1) {
             self.entries[i].occupied = false;
         }
     }
@@ -31,10 +31,9 @@ impl<K, V> HashMap<K, V> {
             self.resize(self.capacity * 2);
         }
 
-        h: i32 = (key as i32) % self.capacity;
-        if (h < 0) { h = h + self.capacity; }
-        for (i: i32 = 0; i < self.capacity; i = i + 1) {
-            idx: i32 = (h + i) % self.capacity;
+        h: usize = (key as usize) % self.capacity;
+        for (i: usize = 0; i < self.capacity; i = i + 1) {
+            idx: usize = (h + i) % self.capacity;
             if (!self.entries[idx].occupied) {
                 self.entries[idx].key = key;
                 self.entries[idx].value = value;
@@ -51,10 +50,9 @@ impl<K, V> HashMap<K, V> {
     }
 
     pub fn get(self: *HashMap<K, V>, key: K) -> V {
-        h: i32 = (key as i32) % self.capacity;
-        if (h < 0) { h = h + self.capacity; }
-        for (i: i32 = 0; i < self.capacity; i = i + 1) {
-            idx: i32 = (h + i) % self.capacity;
+        h: usize = (key as usize) % self.capacity;
+        for (i: usize = 0; i < self.capacity; i = i + 1) {
+            idx: usize = (h + i) % self.capacity;
             if (!self.entries[idx].occupied) {
                 break;
             }
@@ -65,18 +63,18 @@ impl<K, V> HashMap<K, V> {
         return 0 as V;
     }
 
-    pub fn resize(self: *HashMap<K, V>, new_cap: i32) {
+    pub fn resize(self: *HashMap<K, V>, new_cap: usize) {
         old_entries: *MapEntry<K, V> = self.entries;
-        old_cap: i32 = self.capacity;
+        old_cap: usize = self.capacity;
 
         self.capacity = new_cap;
         self.size = 0;
-        self.entries = @alloc(MapEntry<K, V>, std.heap.allocator, new_cap as i64);
-        for (i: i32 = 0; i < new_cap; i = i + 1) {
+        self.entries = @alloc(MapEntry<K, V>, std.heap.allocator, new_cap);
+        for (i: usize = 0; i < new_cap; i = i + 1) {
             self.entries[i].occupied = false;
         }
 
-        for (i: i32 = 0; i < old_cap; i = i + 1) {
+        for (i: usize = 0; i < old_cap; i = i + 1) {
             if (old_entries[i].occupied) {
                 self.put(old_entries[i].key, old_entries[i].value);
             }

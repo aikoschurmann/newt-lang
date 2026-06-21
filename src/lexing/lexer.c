@@ -55,6 +55,8 @@ static const struct {
     {"f64", TOK_F64},
     {"str", TOK_STRING},
     {"char", TOK_CHAR},
+    {"usize", TOK_USIZE},
+    {"isize", TOK_ISIZE},
     {"void", TOK_VOID},
     {"true", TOK_TRUE},
     {"false", TOK_FALSE},
@@ -601,6 +603,8 @@ const char* token_type_to_string(TokenKind type) {
         case TOK_F32: return "F32";
         case TOK_F64: return "F64";
         case TOK_CHAR: return "CHAR";
+        case TOK_USIZE: return "USIZE";
+        case TOK_ISIZE: return "ISIZE";
         case TOK_TRUE: return "TRUE";
         case TOK_FALSE: return "FALSE";
         case TOK_IDENTIFIER: return "IDENTIFIER";

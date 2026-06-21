@@ -10,27 +10,29 @@
    Rows: Source type, Columns: Target type.
    Indices correspond to PrimitiveKind enum in include/sema/type.h:
    0:I8, 1:I16, 2:I32, 3:I64, 4:U8, 5:U16, 6:U32, 7:U64, 8:F32, 9:F64, 10:BOOL, 11:CHAR */
-static const bool primitive_coercion_matrix[12][12] = {
-    /* Target: I8  I16 I32 I64 U8  U16 U32 U64 F32 F64 BOL CHR */
-    /* I8  */ {0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  0},
-    /* I16 */ {0,  0,  1,  1,  0,  0,  0,  0,  1,  1,  0,  0},
-    /* I32 */ {0,  0,  0,  1,  0,  0,  0,  0,  0,  1,  0,  0},
-    /* I64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    /* U8  */ {0,  1,  1,  1,  0,  1,  1,  1,  1,  1,  0,  0},
-    /* U16 */ {0,  0,  1,  1,  0,  0,  1,  1,  1,  1,  0,  0},
-    /* U32 */ {0,  0,  0,  1,  0,  0,  0,  1,  0,  1,  0,  0},
-    /* U64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    /* F32 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0},
-    /* F64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    /* BOL */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    /* CHR */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+static const bool primitive_coercion_matrix[14][14] = {
+    /* Target: I8  I16 I32 I64 U8  U16 U32 U64 F32 F64 BOL CHR USZ ISZ */
+    /* I8  */ {0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  0,  0,  1},
+    /* I16 */ {0,  0,  1,  1,  0,  0,  0,  0,  1,  1,  0,  0,  0,  1},
+    /* I32 */ {0,  0,  0,  1,  0,  0,  0,  0,  0,  1,  0,  0,  0,  1},
+    /* I64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* U8  */ {0,  1,  1,  1,  0,  1,  1,  1,  1,  1,  0,  0,  1,  1},
+    /* U16 */ {0,  0,  1,  1,  0,  0,  1,  1,  1,  1,  0,  0,  1,  1},
+    /* U32 */ {0,  0,  0,  1,  0,  0,  0,  1,  0,  1,  0,  0,  1,  1},
+    /* U64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* F32 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0},
+    /* F64 */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* BOL */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* CHR */ {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+    /* USZ */ {0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0,  0},
+    /* ISZ */ {0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
 };
 
 static bool can_implicit_cast_primitive(Type *target, Type *source) {
     PrimitiveKind s = source->as.primitive;
     PrimitiveKind t = target->as.primitive;
 
-    if (s < 0 || s >= 12 || t < 0 || t >= 12) return false;
+    if (s < 0 || s >= 14 || t < 0 || t >= 14) return false;
 
     return primitive_coercion_matrix[s][t];
 }
@@ -114,7 +116,8 @@ bool type_can_explicit_cast(Type *target, Type *source) {
 
         Type *int_type = (source->kind == TYPE_POINTER) ? target : source;
         if (int_type->kind == TYPE_PRIMITIVE && 
-            (int_type->as.primitive == PRIM_I64 || int_type->as.primitive == PRIM_U64)) {
+            (int_type->as.primitive == PRIM_I64 || int_type->as.primitive == PRIM_U64 ||
+             int_type->as.primitive == PRIM_USIZE || int_type->as.primitive == PRIM_ISIZE)) {
             return true;
         }
     }

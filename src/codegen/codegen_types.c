@@ -81,6 +81,8 @@ LLVMTypeRef get_llvm_type(CodegenContext *ctx, Type *t) {
                 case PRIM_F64:  res = LLVMDoubleTypeInContext(ctx->context); break;
                 case PRIM_BOOL: res = LLVMInt8TypeInContext(ctx->context); break;
                 case PRIM_CHAR: res = LLVMInt8TypeInContext(ctx->context); break;
+                case PRIM_USIZE: res = LLVMInt64TypeInContext(ctx->context); break;
+                case PRIM_ISIZE: res = LLVMInt64TypeInContext(ctx->context); break;
                 default:        ICE("get_llvm_type: unrecognized primitive kind %d", t->as.primitive);
             }
             break;

@@ -3,12 +3,12 @@ import std.heap;
 
 pub struct Arena {
     buffer: *char; // raw bytes
-    capacity: i64;
-    offset: i64;
+    capacity: usize;
+    offset: usize;
     backing_allocator: std.mem.Allocator;
 }
 
-fn arena_alloc_impl(ctx: *void, size: i64) -> *void {
+fn arena_alloc_impl(ctx: *void, size: usize) -> *void {
     arena: *Arena = ctx as *Arena;
     return arena.alloc(size);
 }
@@ -18,7 +18,7 @@ fn arena_free_impl(ctx: *void, ptr: *void) -> void {
 
 impl Arena {
     // Create an Arena with a specific backing allocator.
-    pub fn new(backing: std.mem.Allocator, size: i64) -> Arena {
+    pub fn new(backing: std.mem.Allocator, size: usize) -> Arena {
         buf: *char = backing.alloc(size) as *char;
         return Arena {
             buffer: buf,
@@ -29,24 +29,24 @@ impl Arena {
     }
 
     // Create an Arena using the default heap allocator.
-    pub fn new(size: i64) -> Arena {
+    pub fn new(size: usize) -> Arena {
         return Arena.new(std.heap.allocator, size);
     }
 
-    pub fn alloc(self: *Arena, size: i64) -> *void {
+    pub fn alloc(self: *Arena, size: usize) -> *void {
         // Check for Out-Of-Memory
         if (self.offset + size) > self.capacity {
             return null; 
         }
         
         // Bump the pointer
-        ptr: *void = ((self.buffer as i64) + self.offset) as *void;
+        ptr: *void = ((self.buffer as usize) + self.offset) as *void;
         self.offset = self.offset + size;
         return ptr;
     }
 
     // Overloaded alloc for count * size
-    pub fn alloc(self: *Arena, count: i64, size: i64) -> *void {
+    pub fn alloc(self: *Arena, count: usize, size: usize) -> *void {
         return self.alloc(count * size);
     }
 
@@ -55,7 +55,7 @@ impl Arena {
     }
 
     // Returns how many bytes are still available.
-    pub fn remaining(self: *Arena) -> i64 {
+    pub fn remaining(self: *Arena) -> usize {
         return self.capacity - self.offset;
     }
 

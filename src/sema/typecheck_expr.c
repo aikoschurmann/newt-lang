@@ -807,11 +807,11 @@ Type* check_subscript(TypeCheckContext *ctx, Scope *scope, AstNode *expr, Type *
     // =========================================================================
     // 3. INDEX RESOLUTION & COERCION
     // =========================================================================
-    // The index must evaluate to an integer type (we hint for i64).
-    Type *index_type = check_expression(ctx, scope, subscript->index, ctx->store->t_i64);
+    // The index must evaluate to an integer type (we hint for usize).
+    Type *index_type = check_expression(ctx, scope, subscript->index, ctx->store->t_usize);
     if (index_type) {
-        // Force coercion to exactly i64 (e.g., if it's an i32 or an implicitly castable literal).
-        coerce_or_error(ctx, subscript->index, ctx->store->t_i64);
+        // Force coercion to exactly usize (e.g., if it's an implicitly castable literal or smaller uint).
+        coerce_or_error(ctx, subscript->index, ctx->store->t_usize);
     } else {
         return NULL; // Failed to typecheck the index
     }
@@ -1202,10 +1202,10 @@ static void validate_allocator_structure(TypeCheckContext *ctx, AstNode *alloc_a
         Type *fn_ty = alloc_field->type;
         if (fn_ty->as.func.param_count != 2 || 
             fn_ty->as.func.params[0]->kind != TYPE_POINTER ||
-            (fn_ty->as.func.params[1]->kind != TYPE_PRIMITIVE || fn_ty->as.func.params[1]->as.primitive != PRIM_I64) ||
+            (fn_ty->as.func.params[1]->kind != TYPE_PRIMITIVE || fn_ty->as.func.params[1]->as.primitive != PRIM_USIZE) ||
             fn_ty->as.func.return_type->kind != TYPE_POINTER) {
             TypeError err = { .kind = TE_INVALID_ALLOCATOR, .span = alloc_arg->span, .filename = ctx->filename, 
-                              .as.name.name = "field '_alloc' must have signature: fn(ptr, i64) -> ptr" };
+                              .as.name.name = "field '_alloc' must have signature: fn(ptr, usize) -> ptr" };
             dynarray_push_value(ctx->errors, &err);
         }
     }
@@ -1270,10 +1270,10 @@ static Type *check_intrinsic(TypeCheckContext *ctx, Scope *scope, AstNode *expr,
 
         // 3. Arg 2: Must be an integer if present
         if (count_arg) {
-            Type *count_ty = check_expression(ctx, scope, count_arg, ctx->store->t_i64);
+            Type *count_ty = check_expression(ctx, scope, count_arg, ctx->store->t_usize);
             if (count_ty && !type_is_integer(count_ty)) {
                 TypeError err = { .kind = TE_TYPE_MISMATCH, .span = count_arg->span, .filename = ctx->filename };
-                err.as.mismatch.expected = ctx->store->t_i64;
+                err.as.mismatch.expected = ctx->store->t_usize;
                 err.as.mismatch.actual = count_ty;
                 dynarray_push_value(ctx->errors, &err);
             }
@@ -1538,8 +1538,8 @@ static Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *exp
                 expr->is_llvm_const_safe = 1;
                 expr->const_value.type = INT_LITERAL;
                 expr->const_value.value.int_val = underlying->as.array.size;
-                expr->type = ctx->store->t_i64;
-                return ctx->store->t_i64;
+                expr->type = ctx->store->t_usize;
+                return ctx->store->t_usize;
             } else {
                 const char *field_name = "<unknown>";
                 if (member_expr->member && member_expr->member->key) {
@@ -1582,7 +1582,7 @@ static Type* check_member_expr(TypeCheckContext *ctx, Scope *scope, AstNode *exp
         case TYPE_SLICE:
             if (member_expr->member == ctx->store->kw_len) {
                 // Slice: Index 1 is the 'len' in the { ptr, len } fat pointer struct
-                return ctx->store->t_i64;
+                return ctx->store->t_usize;
             } else {
                 const char *field_name = "<unknown>";
                 if (member_expr->member && member_expr->member->key) {

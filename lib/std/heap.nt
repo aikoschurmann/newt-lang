@@ -1,7 +1,7 @@
 import std.libc;
 import std.mem;
 
-fn heap_alloc_impl(_ctx: *void, size: i64) -> *void {
+fn heap_alloc_impl(_ctx: *void, size: usize) -> *void {
     return std.libc.malloc(size);
 }
 

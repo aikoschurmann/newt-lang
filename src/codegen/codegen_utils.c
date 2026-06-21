@@ -40,6 +40,8 @@ static void mangle_type_recursive(char *buf, size_t *pos, size_t cap, Type *t) {
                 case PRIM_U64:  buf[(*pos)++] = 'U'; break; // 'U' for u-long
                 case PRIM_F32:  buf[(*pos)++] = 'f'; break;
                 case PRIM_F64:  buf[(*pos)++] = 'F'; break;
+                case PRIM_USIZE: buf[(*pos)++] = 'z'; break;
+                case PRIM_ISIZE: buf[(*pos)++] = 'Z'; break;
                 case PRIM_BOOL: buf[(*pos)++] = 'o'; break;
                 case PRIM_CHAR: buf[(*pos)++] = 'c'; break;
             }

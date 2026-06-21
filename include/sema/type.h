@@ -26,7 +26,9 @@ typedef enum {
     PRIM_U8,  PRIM_U16,  PRIM_U32,  PRIM_U64,
     PRIM_F32, PRIM_F64,
     PRIM_BOOL,
-    PRIM_CHAR
+    PRIM_CHAR,
+    PRIM_USIZE,
+    PRIM_ISIZE
 } PrimitiveKind;
 
 typedef struct {
@@ -126,6 +128,7 @@ typedef struct TypeStore {
     Type *t_f32, *t_f64;
     Type *t_bool;
     Type *t_char;
+    Type *t_usize, *t_isize;
     Type *t_str;
 
     // Pre-interned common property names

@@ -1610,6 +1610,7 @@ static size_t type_mangled_len(Type *t) {
                 case PRIM_I16: case PRIM_U16: return 3;
                 case PRIM_I32: case PRIM_U32: case PRIM_F32: return 3;
                 case PRIM_I64: case PRIM_U64: case PRIM_F64: return 3;
+                case PRIM_USIZE: case PRIM_ISIZE: return 5;
                 case PRIM_BOOL: case PRIM_CHAR: return 4;
             }
             return 0;
@@ -1651,6 +1652,8 @@ static void type_to_mangled_str_append(Type *t, char **buf) {
                 case PRIM_U64: memcpy(*buf, "u64", 3); *buf += 3; break;
                 case PRIM_F32: memcpy(*buf, "f32", 3); *buf += 3; break;
                 case PRIM_F64: memcpy(*buf, "f64", 3); *buf += 3; break;
+                case PRIM_USIZE: memcpy(*buf, "usize", 5); *buf += 5; break;
+                case PRIM_ISIZE: memcpy(*buf, "isize", 5); *buf += 5; break;
                 case PRIM_BOOL: memcpy(*buf, "bool", 4); *buf += 4; break;
                 case PRIM_CHAR: memcpy(*buf, "char", 4); *buf += 4; break;
             }

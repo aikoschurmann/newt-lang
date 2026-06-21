@@ -2,8 +2,10 @@ import std;
 alias Arena     = std.arena.Arena;
 alias Allocator = std.mem.Allocator;
 alias Vec       = std.vec.Vec;
+alias printf    = std.libc.printf;
 
-const NUM_VARS: i32 = 729;
+const N: i32 = 16;
+const NUM_VARS: i32 = N * N;
 
 alias Val = u8;
 const VAL_UNASSIGNED: Val = 0;
@@ -20,12 +22,12 @@ struct Formula {
     clause_data: Vec<i32>;
     clauses: Vec<ClauseRef>;
     watches: Vec<Vec<i32>>; 
-    assignment: Val[729];
+    assignment: Val[256];
     trail: Vec<i32>;
-    unassigned_counts: i32[81];
+    unassigned_counts: i32[16];
 }
 
-fn sv(r: i32, c: i32, v: i32) -> i32 { return (r * 81) + (c * 9) + v + 1; }
+fn sv(r: i32, c: i32) -> i32 { return (r * N) + c + 1; }
 
 fn lit_to_idx(lit: i32) -> usize {
     if (lit > 0) { return (lit as usize) * 2; }
@@ -48,8 +50,8 @@ impl Formula {
         self.assignment[var_idx as usize - 1] = val;
         self.trail.push(var_idx);
         
-        cell_idx: usize = ((var_idx - 1) / 9) as usize;
-        self.unassigned_counts[cell_idx] = self.unassigned_counts[cell_idx] - 1;
+        row_idx: usize = ((var_idx - 1) / N) as usize;
+        self.unassigned_counts[row_idx] = self.unassigned_counts[row_idx] - 1;
     }
 
     fn add_clause(self: *Formula, lits: i32[]) {
@@ -64,6 +66,31 @@ impl Formula {
         
         l0: i32 = lits[0];
         l1: i32 = lits[1];
+        if (lits.len == 2) {
+            // printf("Added binary clause\n");
+        }
+        
+        v0: Vec<i32> = self.watches.get(lit_to_idx(l0));
+        v0.push(c_idx);
+        self.watches.set(lit_to_idx(l0), v0);
+        
+        v1: Vec<i32> = self.watches.get(lit_to_idx(l1));
+        v1.push(c_idx);
+        self.watches.set(lit_to_idx(l1), v1);
+    }
+    
+    fn add_clause_vec(self: *Formula, lits: *Vec<i32>) {
+        c_idx: i32 = self.clauses.len as i32;
+        offset: usize = self.clause_data.len;
+        for (i: usize = 0; i < lits.len; i += 1) {
+            self.clause_data.push(lits.get(i));
+        }
+        self.clauses.push(ClauseRef { offset: offset, len: lits.len });
+        
+        if (lits.len <= 1) { return; }
+        
+        l0: i32 = lits.get(0);
+        l1: i32 = lits.get(1);
         
         v0: Vec<i32> = self.watches.get(lit_to_idx(l0));
         v0.push(c_idx);
@@ -168,28 +195,28 @@ impl Formula {
         return true;
     }
 
-    fn solve(self: *Formula) -> i32 {
+    fn solve(self: *Formula, head: usize) -> i32 {
         trail_start: usize = self.trail.len;
 
-        if (!self.propagate(trail_start)) {
+        if (!self.propagate(head)) {
             for (i: usize = trail_start; i < self.trail.len; i += 1) {
                 var_idx: i32 = self.trail.get(i);
                 self.assignment[var_idx as usize - 1] = VAL_UNASSIGNED;
-                cell_idx: usize = ((var_idx - 1) / 9) as usize;
-                self.unassigned_counts[cell_idx] = self.unassigned_counts[cell_idx] + 1;
+                row_idx: usize = ((var_idx - 1) / N) as usize;
+                self.unassigned_counts[row_idx] = self.unassigned_counts[row_idx] + 1;
             }
             self.trail.len = trail_start;
             return -1;
         }
 
-        pick_cell: i32 = -1;
-        min_unassigned: i32 = 10;
-        for (cell: usize = 0; cell < 81; cell += 1) {
-            unassigned: i32 = self.unassigned_counts[cell];
+        pick_row: i32 = -1;
+        min_unassigned: i32 = N + 1;
+        for (r: usize = 0; r < (N as usize); r += 1) {
+            unassigned: i32 = self.unassigned_counts[r];
             if (unassigned > 0) {
                 solved: bool = false;
-                for (v: i32 = 0; v < 9; v += 1) {
-                    var_idx: i32 = ((cell as i32) * 9) + v + 1;
+                for (c: i32 = 0; c < N; c += 1) {
+                    var_idx: i32 = ((r as i32) * N) + c + 1;
                     if (self.assignment[var_idx as usize - 1] == VAL_TRUE) {
                         solved = true;
                         break;
@@ -197,21 +224,17 @@ impl Formula {
                 }
                 if (!solved && unassigned < min_unassigned) {
                     min_unassigned = unassigned;
-                    pick_cell = cell as i32;
+                    pick_row = r as i32;
                     if (min_unassigned == 1) { break; }
                 }
             }
         }
-
-        if (pick_cell == -1) {
+        if (pick_row == -1) {
             total: i32 = 0;
-            for (r: i32 = 0; r < 9; r += 1) {
-                for (c: i32 = 0; c < 9; c += 1) {
-                    for (v: i32 = 0; v < 9; v += 1) {
-                        if ((lit_val(self.assignment, sv(r, c, v)) == VAL_TRUE)) {
-                            digit: i32 = v + 1;
-                            total = total + (digit * digit);
-                        }
+            for (r: i32 = 0; r < N; r += 1) {
+                for (c: i32 = 0; c < N; c += 1) {
+                    if ((lit_val(self.assignment, sv(r, c)) == VAL_TRUE)) {
+                        total = total + c;
                     }
                 }
             }
@@ -219,8 +242,8 @@ impl Formula {
         }
 
         pick: i32 = -1;
-        for (v: i32 = 0; v < 9; v += 1) {
-            var_idx: i32 = (pick_cell * 9) + v + 1;
+        for (c: i32 = 0; c < N; c += 1) {
+            var_idx: i32 = (pick_row * N) + c + 1;
             if (self.assignment[var_idx as usize - 1] == VAL_UNASSIGNED) {
                 pick = var_idx;
                 break;
@@ -228,26 +251,26 @@ impl Formula {
         }
 
         self.assign(pick, VAL_TRUE);
-        res1: i32 = self.solve();
+        res1: i32 = self.solve(trail_start);
         if (res1 >= 0) { return res1; }
 
         for (i: usize = trail_start; i < self.trail.len; i += 1) {
             var_idx: i32 = self.trail.get(i);
             self.assignment[var_idx as usize - 1] = VAL_UNASSIGNED;
-            cell_idx: usize = ((var_idx - 1) / 9) as usize;
-            self.unassigned_counts[cell_idx] = self.unassigned_counts[cell_idx] + 1;
+            row_idx: usize = ((var_idx - 1) / N) as usize;
+            self.unassigned_counts[row_idx] = self.unassigned_counts[row_idx] + 1;
         }
         self.trail.len = trail_start;
 
         self.assign(pick, VAL_FALSE);
-        res2: i32 = self.solve();
+        res2: i32 = self.solve(trail_start);
         
         if (res2 < 0) {
             for (i: usize = trail_start; i < self.trail.len; i += 1) {
                 var_idx: i32 = self.trail.get(i);
                 self.assignment[var_idx as usize - 1] = VAL_UNASSIGNED;
-                cell_idx: usize = ((var_idx - 1) / 9) as usize;
-                self.unassigned_counts[cell_idx] = self.unassigned_counts[cell_idx] + 1;
+                row_idx: usize = ((var_idx - 1) / N) as usize;
+                self.unassigned_counts[row_idx] = self.unassigned_counts[row_idx] + 1;
             }
             self.trail.len = trail_start;
         }
@@ -257,20 +280,21 @@ impl Formula {
     
     fn init(self: *Formula, a: *Allocator) {
         self.alloc_ref = a;
-        self.clauses.with_capacity(a, 12000);
-        self.trail.with_capacity(a, 12000);
-        self.clause_data.with_capacity(a, 40000);
-        self.watches.with_capacity(a, 1460);
+        self.clauses.with_capacity(a, 20000);
+        self.trail.with_capacity(a, 2000);
+        self.clause_data.with_capacity(a, 60000);
+        watches_size: usize = (NUM_VARS * 2 + 2) as usize;
+        self.watches.with_capacity(a, watches_size);
 
-        for (i: usize = 0; i < 81; i += 1) {
-            self.unassigned_counts[i] = 9;
+        for (i: usize = 0; i < (N as usize); i += 1) {
+            self.unassigned_counts[i] = N;
         }
 
-        for (i: usize = 0; i < 729; i += 1) { 
+        for (i: usize = 0; i < (NUM_VARS as usize); i += 1) { 
             self.assignment[i] = VAL_UNASSIGNED; 
         }
 
-        for (i: usize = 0; i < 1460; i += 1) {
+        for (i: usize = 0; i < watches_size; i += 1) {
             v: Vec<i32>;
             v.with_capacity(a, 32);
             self.watches.push(v);
@@ -278,67 +302,81 @@ impl Formula {
     }
 }
 
-fn build_sudoku(f: *Formula) {
-    for (r: i32 = 0; r < 9; r += 1) {
-        for (c: i32 = 0; c < 9; c += 1) {
-            f.add_clause({ 
-                sv(r,c,0), sv(r,c,1), sv(r,c,2), 
-                sv(r,c,3), sv(r,c,4), sv(r,c,5), 
-                sv(r,c,6), sv(r,c,7), sv(r,c,8) 
-            });
+fn build_nqueens(f: *Formula) {
+    // 1. One queen per row
+    for (r: i32 = 0; r < N; r += 1) {
+        // ALO
+        alo: Vec<i32>;
+        alo.with_capacity(f.alloc_ref, N as usize);
+        for (c: i32 = 0; c < N; c += 1) {
+            alo.push(sv(r, c));
+        }
+        f.add_clause_vec(&alo);
+        alo.free();
+        
+        // AMO
+        for (c1: i32 = 0; c1 < N; c1 += 1) {
+            for (c2: i32 = c1 + 1; c2 < N; c2 += 1) {
+                amo: Vec<i32>;
+                amo.with_capacity(f.alloc_ref, 2 as usize);
+                amo.push(-sv(r, c1));
+                amo.push(-sv(r, c2));
+                f.add_clause_vec(&amo);
+                amo.free();
+            }
         }
     }
-
-    for (r: i32 = 0; r < 9; r += 1) {
-        for (c: i32 = 0; c < 9; c += 1) {
-            for (v1: i32 = 0; v1 < 9; v1 += 1) {
-                for (v2: i32 = v1 + 1; v2 < 9; v2 += 1) {
-                    f.add_clause({ -sv(r,c,v1), -sv(r,c,v2) });
-                }
+    
+    // 2. One queen per col
+    for (c: i32 = 0; c < N; c += 1) {
+        // ALO
+        alo: Vec<i32>;
+        alo.with_capacity(f.alloc_ref, N as usize);
+        for (r: i32 = 0; r < N; r += 1) {
+            alo.push(sv(r, c));
+        }
+        f.add_clause_vec(&alo);
+        alo.free();
+        
+        // AMO
+        for (r1: i32 = 0; r1 < N; r1 += 1) {
+            for (r2: i32 = r1 + 1; r2 < N; r2 += 1) {
+                amo: Vec<i32>;
+                amo.with_capacity(f.alloc_ref, 2 as usize);
+                amo.push(-sv(r1, c));
+                amo.push(-sv(r2, c));
+                f.add_clause_vec(&amo);
+                amo.free();
             }
         }
     }
 
-    for (r: i32 = 0; r < 9; r += 1) {
-        for (v: i32 = 0; v < 9; v += 1) {
-            for (c1: i32 = 0; c1 < 9; c1 += 1) {
-                for (c2: i32 = c1 + 1; c2 < 9; c2 += 1) {
-                    f.add_clause({ -sv(r,c1,v), -sv(r,c2,v) });
-                }
+    // 3. Diagonals AMO
+    for (r1: i32 = 0; r1 < N; r1 += 1) {
+        for (c1: i32 = 0; c1 < N; c1 += 1) {
+            // Main diagonal
+            d: i32 = 1;
+            while ((r1 + d < N) && (c1 + d < N)) {
+                amo: Vec<i32>;
+                amo.with_capacity(f.alloc_ref, 2 as usize);
+                amo.push(-sv(r1, c1));
+                amo.push(-sv(r1 + d, c1 + d));
+                f.add_clause_vec(&amo);
+                amo.free();
+                d += 1;
             }
-        }
-    }
-
-    for (c: i32 = 0; c < 9; c += 1) {
-        for (v: i32 = 0; v < 9; v += 1) {
-            for (r1: i32 = 0; r1 < 9; r1 += 1) {
-                for (r2: i32 = r1 + 1; r2 < 9; r2 += 1) {
-                    f.add_clause({ -sv(r1,c,v), -sv(r2,c,v) });
-                }
+            
+            // Anti-diagonal
+            d = 1;
+            while ((r1 + d < N) && (c1 - d >= 0)) {
+                amo: Vec<i32>;
+                amo.with_capacity(f.alloc_ref, 2 as usize);
+                amo.push(-sv(r1, c1));
+                amo.push(-sv(r1 + d, c1 - d));
+                f.add_clause_vec(&amo);
+                amo.free();
+                d += 1;
             }
-        }
-    }
-
-    for (br: i32 = 0; br < 3; br += 1) {
-        for (bc: i32 = 0; bc < 3; bc += 1) {
-            for (v: i32 = 0; v < 9; v += 1) {
-                for (i1: i32 = 0; i1 < 9; i1 += 1) {
-                    for (i2: i32 = i1 + 1; i2 < 9; i2 += 1) {
-                        r1: i32 = (br * 3) + (i1 / 3); c1: i32 = (bc * 3) + (i1 % 3);
-                        r2: i32 = (br * 3) + (i2 / 3); c2: i32 = (bc * 3) + (i2 % 3);
-                        f.add_clause({ -sv(r1,c1,v), -sv(r2,c2,v) });
-                    }
-                }
-            }
-        }
-    }
-
-    grid: *char = "42..6....5..084....87....5.7...5...23..7.2..06...1...5.5....17....308..4....7..68";
-    for (i: usize = 0; i < 81; i += 1) {
-        ch: char = grid[i];
-        if (ch != '.') { 
-            val: i32 = (ch as i32) - ('0' as i32); 
-            f.add_clause({ sv((i as i32) / 9, (i as i32) % 9, val) });
         }
     }
 }
@@ -351,7 +389,7 @@ fn main() -> i32 {
 
     f: Formula;
     f.init(&alloc_ref);
-    build_sudoku(&f);
+    build_nqueens(&f);
     
     // Initial propagation pass
     for (i: usize = 0; i < f.clauses.len; i += 1) {
@@ -375,6 +413,7 @@ fn main() -> i32 {
         return -1;
     }
 
-    result: i32 = f.solve();
+    result: i32 = f.solve(f.trail.len);
+    // Return >= 0 if SAT, -1 if UNSAT
     return result;
 }

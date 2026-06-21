@@ -8,6 +8,7 @@ bool type_is_integer(Type *t) {
     switch (t->as.primitive) {
         case PRIM_I8: case PRIM_I16: case PRIM_I32: case PRIM_I64:
         case PRIM_U8: case PRIM_U16: case PRIM_U32: case PRIM_U64:
+        case PRIM_USIZE: case PRIM_ISIZE:
             return true;
         default:
             return false;

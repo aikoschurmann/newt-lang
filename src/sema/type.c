@@ -305,6 +305,8 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
 
     ts->t_bool = create_primitive(ts, PRIM_BOOL);
     ts->t_char = create_primitive(ts, PRIM_CHAR);
+    ts->t_usize = create_primitive(ts, PRIM_USIZE);
+    ts->t_isize = create_primitive(ts, PRIM_ISIZE);
     
     // Create canonical str type (*char)
     Type str_proto = { .kind = TYPE_POINTER, .as.ptr.base = ts->t_char };
@@ -339,6 +341,8 @@ TypeStore *typestore_create(Arena *arena, DenseArenaInterner *identifiers, Dense
     register_prim(ts, keywords, "f64", ts->t_f64);
     register_prim(ts, keywords, "bool", ts->t_bool);
     register_prim(ts, keywords, "char", ts->t_char);
+    register_prim(ts, keywords, "usize", ts->t_usize);
+    register_prim(ts, keywords, "isize", ts->t_isize);
     register_prim(ts, keywords, "str", ts->t_str);
     register_prim(ts, keywords, "void", ts->t_void);
 

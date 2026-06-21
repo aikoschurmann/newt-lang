@@ -1,11 +1,11 @@
 @link("malloc")
-pub fn malloc(size: i64) -> *void;
+pub fn malloc(size: usize) -> *void;
 
 @link("calloc")
-pub fn calloc(count: i64, size: i64) -> *void;
+pub fn calloc(count: usize, size: usize) -> *void;
 
 @link("realloc")
-pub fn realloc(ptr: *void, size: i64) -> *void;
+pub fn realloc(ptr: *void, size: usize) -> *void;
 
 @link("free")
 pub fn free(ptr: *void) -> void;
@@ -13,17 +13,23 @@ pub fn free(ptr: *void) -> void;
 @link("printf")
 pub fn printf(fmt: *char) -> i32;
 
+@link("putchar")
+pub fn putchar(c: i32) -> i32;
+
+@link("clock")
+pub fn clock() -> i64;
+
 @link("strlen")
-pub fn strlen(s: *char) -> i64;
+pub fn strlen(s: *char) -> usize;
 
 @link("memcpy")
-pub fn memcpy(dst: *void, src: *void, n: i64) -> *void;
+pub fn memcpy(dst: *void, src: *void, n: usize) -> *void;
 
 @link("memset")
-pub fn memset(dst: *void, val: i32, n: i64) -> *void;
+pub fn memset(dst: *void, val: i32, n: usize) -> *void;
 
 @link("memcmp")
-pub fn memcmp(a: *void, b: *void, n: i64) -> i32;
+pub fn memcmp(a: *void, b: *void, n: usize) -> i32;
 
 @link("exit")
 pub fn exit(code: i32) -> void;

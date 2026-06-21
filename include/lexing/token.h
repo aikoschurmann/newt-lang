@@ -39,6 +39,8 @@ typedef enum {
     TOK_F64,
     TOK_STRING,
     TOK_CHAR,
+    TOK_USIZE,
+    TOK_ISIZE,
     TOK_VOID,
 
     // operators
